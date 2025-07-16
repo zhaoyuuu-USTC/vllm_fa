@@ -16,20 +16,36 @@ namespace flash {
 using namespace cute;
 
 
-template<bool zero_init=true, typename Engine0, typename Layout0, typename Engine1, typename Layout1, typename Operator>
-__device__ __forceinline__ void thread_aws_reduce_(Tensor<Engine0, Layout0> const &tensor, Tensor<Engine1, Layout1> &summary, Operator &op) {
+template<typename Engine0, typename Layout0, typename Engine1, typename Layout1, typename Operator>
+__device__ __forceinline__ void thread_aws_reduce_(Tensor<Engine0, Layout0> const &acc_s, Tensor<Engine1, Layout1> &row_sum, Operator &op) {
     static_assert(Layout0::rank == 2, "Only support 2D Tensor");
     static_assert(Layout1::rank == 1, "Only support 1D Tensor");
-    CUTE_STATIC_ASSERT_V(size<0>(summary) == size<0>(tensor));
+    CUTE_STATIC_ASSERT_V(size<0>(row_sum) == size<0>(acc_s));
     #pragma unroll
-    for (int mi = 0; mi < size<0>(tensor); mi++) {
-        summary(mi) = zero_init ? tensor(mi, 0) : op(summary(mi), tensor(mi, 0));
+    for (int mi = 0; mi < size<0>(acc_s); mi++) {
         #pragma unroll
-        for (int ni = 1; ni < size<1>(tensor); ni++) {
-            summary(mi) = op(summary(mi), tensor(mi, ni));
+        for (int ni = 0; ni < size<1>(acc_s); ni++) {
+            row_sum(mi) = op(row_sum(mi), acc_s(mi, ni));
         }
     }
 }
+
+template<typename Engine0, typename Layout0, typename Engine1, typename Layout1, typename Operator>
+__device__ __forceinline__ void thread_aws_reduce2_(Tensor<Engine0, Layout0> const &acc_s, Tensor<Engine1, Layout1> &row_sum, Operator &op, int page_block_size, int n_block) {
+    static_assert(Layout0::rank == 2, "Only support 2D Tensor");
+    static_assert(Layout1::rank == 2, "Only support 2D Tensor");
+    CUTE_STATIC_ASSERT_V(size<0>(row_sum) == size<0>(acc_s));
+    // CUTE_STATIC_ASSERT_V(size<1>(row_sum) == size<1>(acc_s));
+    #pragma unroll
+    for (int mi = 0; mi < size<0>(acc_s); mi++) {
+        #pragma unroll
+        for (int ni = 0; ni < size<1>(acc_s); ni++) {
+            int page_idx = (n_block * page_block_size + ni) / page_block_size;
+            row_sum(mi, page_idx) = op(row_sum(mi, page_idx), acc_s(mi, ni));
+        }
+    }
+}
+
 
 template<typename Engine0, typename Layout0, typename Engine1, typename Layout1, typename Operator>
 __device__ __forceinline__ void quad_aws_allreduce_(Tensor<Engine0, Layout0> &dst, Tensor<Engine1, Layout1> &src, Operator &op) {
@@ -40,43 +56,62 @@ __device__ __forceinline__ void quad_aws_allreduce_(Tensor<Engine0, Layout0> &ds
     }
 }
 
-template<bool zero_init=true, typename Engine0, typename Layout0, typename Engine1, typename Layout1>
-__device__ __forceinline__ void reduce_sum_aw(Tensor<Engine0, Layout0> const& tensor, Tensor<Engine1, Layout1> &sum){
-    AbsSumOp<float> abs_sum_op;   // 绝对值求和，其中包含inf的值会被置0
-    thread_aws_reduce_<zero_init>(tensor, sum, abs_sum_op);
+template<typename Engine0, typename Layout0, typename Engine1, typename Layout1, typename Operator>
+__device__ __forceinline__ void quad_aws_allreduce2_(Tensor<Engine0, Layout0> &dst, Tensor<Engine1, Layout1> &src, Operator &op) {
+    CUTE_STATIC_ASSERT_V(size(dst) == size(src));
+    #pragma unroll
+    for (int i = 0; i < size(dst); i++){
+        #pragma unroll
+        for (int j = 0; j < size<1>(src); j++){
+            dst(i, j) = Allreduce<4>::run(src(i, j), op);
+        }
+    }
 }
 
-template<int KMRows>
+
+template<int KMRows, int MaxPages>
 struct AttentionSum {
 
     using TensorT = decltype(make_tensor<float>(Shape<Int<KMRows>>{}));
-    TensorT row_sum_aw;
+    using TensorT2 = decltype(make_tensor<float>(Shape<Int<KMRows>, Int<MaxPages>>{}));
     
     __forceinline__ __device__ AttentionSum() {};
     // 这里从后往前遍历的块
     template<typename Tensor0, typename Tensor1>
     __forceinline__ __device__ void update_sum_aw(Tensor0 &acc_s, Tensor1 &aws, int n_block, int page_block_size, int kBlockN){
         Tensor scores = make_tensor(acc_s.data(), flash::convert_layout_acc_rowcol(acc_s.layout()));
-
-        static_assert(decltype(size<0>(scores))::value == KMRows);
-
-        flash::template reduce_sum_aw</*zero_init=*/true>(scores, row_sum_aw);
-        AbsSumOp<float> abs_sum_op;
-        flash::template quad_aws_allreduce_(row_sum_aw, row_sum_aw, abs_sum_op);
-
-        // 输出 row_sum_aw 的数据
-        // printf("row_sum_aw 数据: ");
-        // for (int mi = 0; mi < size(row_sum_aw); ++mi) {
-        //     printf("%f ", static_cast<float>(row_sum_aw(mi)));
-        // }
-        // printf("\n");
-
         Tensor aws_rowcol = make_tensor(aws.data(), flash::convert_layout_acc_rowcol(aws.layout()));
 
-        #pragma unroll
-        for (int mi = 0; mi < size(row_sum_aw); ++mi) {
+        static_assert(decltype(size<0>(scores))::value == KMRows);
+        // static_assert(decltype(size<1>(scores))::value == MaxPages);
+
+        if (kBlockN <= page_block_size) {
             int page_idx = n_block * kBlockN / page_block_size;
-            aws_rowcol(mi, page_idx) += row_sum_aw(mi);
+            TensorT row_sum_aw;
+            clear(row_sum_aw);
+            AbsSumOp<float> abs_sum_op;
+            flash::template thread_aws_reduce_(scores, row_sum_aw, abs_sum_op);
+            flash::template quad_aws_allreduce_(row_sum_aw, row_sum_aw, abs_sum_op);
+            #pragma unroll
+            for (int mi = 0; mi < size<0>(row_sum_aw); mi++) {
+                int page_idx = n_block * kBlockN / page_block_size;
+                aws_rowcol(mi, page_idx) += row_sum_aw(mi);
+            }
+        } else {
+            int page_num = kBlockN / page_block_size;
+            TensorT2 row_sum_aw;
+            clear(row_sum_aw);
+            AbsSumOp<float> abs_sum_op;
+            flash::template thread_aws_reduce2_(scores, row_sum_aw, abs_sum_op, page_block_size, n_block);
+            flash::template quad_aws_allreduce2_(row_sum_aw, row_sum_aw, abs_sum_op);
+            #pragma unroll
+            for (int mi = 0; mi < size<0>(row_sum_aw); mi++) {
+                #pragma unroll
+                for (int ni = 0; ni < size<1>(row_sum_aw); ni++) {
+                    int page_idx = (n_block * page_num + ni) / page_num;
+                    aws_rowcol(mi, page_idx) += row_sum_aw(mi, ni);
+                }
+            }
         }
     };
 };

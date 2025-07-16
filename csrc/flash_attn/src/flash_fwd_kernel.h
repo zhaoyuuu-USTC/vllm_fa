@@ -1173,6 +1173,9 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
         n_block_max = std::min(n_block_max,
                             cute::ceil_div((m_block + 1) * kBlockM + binfo.actual_seqlen_k - binfo.actual_seqlen_q + params.window_size_right, kBlockN));
     }
+
+    printf("n_block_min: %d, n_block_max: %d\n", n_block_min, n_block_max);
+
     // 当前的GPU块就只是处理 [n_block_min, n_block_max]之间的块
     if (n_block_min >= n_block_max) {  // This also covers the case where n_block_max <= 0
         // We exit early and write 0 to gOaccum and -inf to gLSEaccum.
@@ -1523,11 +1526,10 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
     // __syncthreads();
     // if (tidx == 0 && blockIdx.y == 0 && blockIdx.z == 0) { print(tKsK); }
     // __syncthreads();
-
     clear(acc_o);
     // 这里的2 * size<1>(acc_o) 可以理解为 kNRows 的值  声明在两次循环之前
     flash::Softmax<2 * size<1>(acc_o)> softmax;
-    flash::AttentionSum<2 * size<1>(acc_o)> attention_sum;
+    flash::AttentionSum<2 * size<1>(acc_o), MaxPages> attention_sum;
     // bool is_first_block = false;
     // bool is_last_block = true;
 

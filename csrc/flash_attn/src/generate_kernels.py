@@ -15,7 +15,8 @@ DTYPE_MAP = {
 }
 
 SM = [80]  # Sm80 kernels support up to
-HEAD_DIMENSIONS = [32, 64, 96, 128, 160, 192, 224, 256]
+# HEAD_DIMENSIONS = [32, 64, 96, 128, 160, 192, 224, 256]
+HEAD_DIMENSIONS = [32, 64, 96]
 IS_CAUSAL = ["false", "true"]
 KERNEL_IMPL_TEMPLATE_FWD = """#include "flash_fwd_launch_template.h"
 
@@ -72,9 +73,9 @@ def get_all_kernels() -> List[Kernel]:
     for direction in ["fwd", "fwd_split"]:
         for dtype, head_dim, is_causal, sm in itertools.product(DTYPE_MAP.keys(), HEAD_DIMENSIONS, IS_CAUSAL, SM):
             yield Kernel(sm=sm, dtype=dtype, head_dim=head_dim, is_causal=is_causal, direction=direction)
-    for direction in ["bwd"]:
-        for dtype, head_dim, sm in itertools.product(DTYPE_MAP.keys(), HEAD_DIMENSIONS, SM):
-            yield Kernel(sm=sm, dtype=dtype, head_dim=head_dim, is_causal="false", direction=direction)
+    # for direction in ["bwd"]:
+    #     for dtype, head_dim, sm in itertools.product(DTYPE_MAP.keys(), HEAD_DIMENSIONS, SM):
+    #         yield Kernel(sm=sm, dtype=dtype, head_dim=head_dim, is_causal="false", direction=direction)
 
 
 def write_kernel(kernel: Kernel, autogen_dir: Path) -> None:

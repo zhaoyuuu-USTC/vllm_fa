@@ -9,6 +9,8 @@
 #include "philox.cuh"
 #include "utils.h"
 
+#include <cstdio>
+
 namespace flash {
 
 using namespace cute;
@@ -55,13 +57,20 @@ struct AttentionSum {
     template<typename Tensor0, typename Tensor1>
     __forceinline__ __device__ void update_sum_aw(Tensor0 &acc_s, Tensor1 &aws, int n_block, int page_block_size, int kBlockN){
         Tensor scores = make_tensor(acc_s.data(), flash::convert_layout_acc_rowcol(acc_s.layout()));
-        
+
         static_assert(decltype(size<0>(scores))::value == KMRows);
 
         flash::template reduce_sum_aw</*zero_init=*/true>(scores, row_sum_aw);
         AbsSumOp<float> abs_sum_op;
         flash::template quad_aws_allreduce_(row_sum_aw, row_sum_aw, abs_sum_op);
-        
+
+        // 输出 row_sum_aw 的数据
+        // printf("row_sum_aw 数据: ");
+        // for (int mi = 0; mi < size(row_sum_aw); ++mi) {
+        //     printf("%f ", static_cast<float>(row_sum_aw(mi)));
+        // }
+        // printf("\n");
+
         Tensor aws_rowcol = make_tensor(aws.data(), flash::convert_layout_acc_rowcol(aws.layout()));
 
         #pragma unroll

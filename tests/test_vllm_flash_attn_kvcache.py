@@ -23,8 +23,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 # NUM_BLOCKS = [32768, 2048]
 
 NUM_HEADS = [(8, 2)]
-HEAD_SIZES = [32]
-BLOCK_SIZES = [32]
+HEAD_SIZES = [64]
+BLOCK_SIZES = [256]
 DTYPES = [torch.float16]
 # one value large enough to test overflow in index calculation.
 # one value small enough to test the schema op check
@@ -87,7 +87,7 @@ def ref_paged_attn(
 
 # 两组，第一组三个序列，KV长度分别为1328, 18, 463，第二组四个序列，KV长度分别为1, 54, 293, 70
 # @pytest.mark.parametrize("kv_lens", [[1328, 18, 463], [1, 54, 293, 70]])
-@pytest.mark.parametrize("kv_lens", [[328, 18, 463]])
+@pytest.mark.parametrize("kv_lens", [[1250]])
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
 @pytest.mark.parametrize("block_size", BLOCK_SIZES)
@@ -181,9 +181,16 @@ def test_flash_attn_with_paged_kv(
     # print(f"time_ref / time_flash_attn_with_kvcache: {t_ref / t_with_kvcache}")
     # torch.testing.assert_close(output, ref_output, atol=2e-2, rtol=1e-2), \
     #     f"{torch.max(torch.abs(output - ref_output))}"
-    print(f"block_aws: {block_aws.shape}")
-    print(f"block_aws: {block_aws}")
-    print(f"ref_output: {ref_output.shape}")
     # print(f"block_aws: {block_aws.shape}")
-    for i in range(block_aws.shape[0]):
-        print(torch.sum(torch.abs(block_aws[i] - ref_output[i])))
+    # print(f"block_aws[0]: {block_aws[0]}")
+    # print(f"block_aws[1]: {block_aws[1]}")
+    # print(f"block_aws[2]: {block_aws[2]}")
+    
+    # print(f"ref_output: {ref_output.shape}")
+    # print(f"block_aws: {block_aws.shape}")
+    # for i in range(block_aws.shape[0]):
+    #     print(torch.sum(torch.abs(block_aws[i] - ref_output[i])))
+    # 将 block_aws 的中间维度（即第1维，num_heads=8）相加，得到形状为 [3, 32]
+    block_aws_sum = block_aws.sum(dim=1)
+    print("block_aws_sum.shape:", block_aws_sum.shape)
+    # print("block_aws_sum:", block_aws_sum[0])

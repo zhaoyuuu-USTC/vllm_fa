@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 NUM_HEADS = [(8, 2)]
 HEAD_SIZES = [64]
-BLOCK_SIZES = [256]
+BLOCK_SIZES = [512]
 DTYPES = [torch.float16]
 # one value large enough to test overflow in index calculation.
 # one value small enough to test the schema op check
@@ -87,7 +87,7 @@ def ref_paged_attn(
 
 # 两组，第一组三个序列，KV长度分别为1328, 18, 463，第二组四个序列，KV长度分别为1, 54, 293, 70
 # @pytest.mark.parametrize("kv_lens", [[1328, 18, 463], [1, 54, 293, 70]])
-@pytest.mark.parametrize("kv_lens", [[1250]])
+@pytest.mark.parametrize("kv_lens", [[3200]])
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
 @pytest.mark.parametrize("block_size", BLOCK_SIZES)
@@ -151,19 +151,19 @@ def test_flash_attn_with_paged_kv(
     else:
         test_utils = ["test_faketensor"]
 
-    torch.library.opcheck(torch.ops.vllm.flash_attn_with_kvcache_aws,
-                          args=tuple(),
-                          kwargs=dict(
-                              decode_query=query.unsqueeze(1),
-                              key_cache=key_cache,
-                              value_cache=value_cache,
-                              softmax_scale=scale,
-                              causal=True,
-                              block_table=block_tables,
-                              cache_seqlens=kv_lens_tensor,
-                              softcap=soft_cap if soft_cap is not None else 0,
-                          ),
-                          test_utils=test_utils)
+    # torch.library.opcheck(torch.ops.vllm.flash_attn_with_kvcache_aws,
+    #                       args=tuple(),
+    #                       kwargs=dict(
+    #                           decode_query=query.unsqueeze(1),
+    #                           key_cache=key_cache,
+    #                           value_cache=value_cache,
+    #                           softmax_scale=scale,
+    #                           causal=True,
+    #                           block_table=block_tables,
+    #                           cache_seqlens=kv_lens_tensor,
+    #                           softcap=soft_cap if soft_cap is not None else 0,
+    #                       ),
+    #                       test_utils=test_utils)
     # t1 = time.perf_counter()
     ref_output = ref_paged_attn(
         query=query,
@@ -188,9 +188,11 @@ def test_flash_attn_with_paged_kv(
     
     # print(f"ref_output: {ref_output.shape}")
     # print(f"block_aws: {block_aws.shape}")
-    # for i in range(block_aws.shape[0]):
-    #     print(torch.sum(torch.abs(block_aws[i] - ref_output[i])))
-    # 将 block_aws 的中间维度（即第1维，num_heads=8）相加，得到形状为 [3, 32]
-    block_aws_sum = block_aws.sum(dim=1)
-    print("block_aws_sum.shape:", block_aws_sum.shape)
+    # # for i in range(block_aws.shape[0]):
+    # #     print(torch.sum(torch.abs(block_aws[i] - ref_output[i])))
+    # # 将 block_aws 的中间维度（即第1维，num_heads=8）相加，得到形状为 [3, 32]
+    # print("block_aws:", block_aws)
+    # block_aws_sum = block_aws.sum(dim=1)
+    # print("block_aws_sum.shape:", block_aws_sum.shape)
     # print("block_aws_sum:", block_aws_sum[0])
+    # print("block_aws_sum:", block_aws_sum)

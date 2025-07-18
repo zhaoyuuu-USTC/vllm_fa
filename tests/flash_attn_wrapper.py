@@ -120,7 +120,7 @@ def flash_attn_with_kvcache_aws(
     )
     # 如果 return_softmax_lse=True，result 是 (out, softmax_lse)，但自定义操作符只能返回单个tensor
     # 所以我们只返回 attention output
-    print(f"result: {result.shape}")
+    # print(f"result: {result.shape}")
     return result
 
 @flash_attn_with_kvcache.register_fake  # type: ignore

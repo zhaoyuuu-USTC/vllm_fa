@@ -1509,32 +1509,36 @@ mha_fwd_kvcache_aws(at::Tensor &q,                 // batch_size x seqlen_q x nu
     // std::cout << "Block_AwsAccum_Size: " << block_aws_accum.sizes() << std::endl;  // 
     // std::cout << "block_aws: " << block_aws[0] << std::endl;
 
-    std::cout << "block_aws_accum[0][0]: " << block_aws_accum[0][0] << std::endl;
+    // std::cout << "block_aws_accum[0][0]: " << block_aws_accum[0][0] << std::endl;
     // std::cout << "block_aws_accum[0][1]: " << block_aws_accum[1][0] << std::endl;
 
-    
+    std::cout << "block_aws.shape: " << block_aws.sizes() << std::endl;
+
+    std::cout << "block_aws: " << block_aws << std::endl;
+
+    // std::cout << "params.num_splits: " << params.num_splits << std::endl;  14
+    // std::cout << "params.seqlen_q: " << params.seqlen_q << std::endl;   4 
+
+    // std::cout << "params.b: " << params.b << std::endl;   1 
+    // std::cout << "params.h: " << params.h << std::endl;   2
+
+
     if (seqlenq_ngroups_swapped) {
         out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
         block_aws = block_aws.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, max_num_blocks_per_seq_rounded});   // 3, 1, 8, 32
         block_aws_accum = block_aws_accum.transpose(2, 3).reshape({params.num_splits, batch_size, 1, num_heads_k * seqlen_q, max_num_blocks_per_seq_rounded});   // 2, 3, 1, 8, 32
     }
-    std::cout << "block_aws_accum.shape: " << block_aws_accum.sizes() << std::endl;
-    // 对 block_aws_accum 的倒数第二个维度进行求和
-    // 例如 shape: [num_splits, batch_size, 1, num_heads_k * seqlen_q, max_num_blocks_per_seq_rounded]
-    // 对倒数第二个维度（即 num_heads_k * seqlen_q 这一维）求和
-    auto block_aws_accum_sum = block_aws_accum.sum(-2);
-    // 如果 block_aws_accum_sum 中存在 nan，则将其置为 0
-    if (block_aws_accum_sum.isnan().any().item<bool>()) {
-        block_aws_accum_sum = block_aws_accum_sum.nan_to_num(0);
-    }
-    std::cout << "block_aws_accum.sum(-2).shape: " << block_aws_accum_sum.sizes() << std::endl;
-    std::cout << "block_aws_accum_sum.sizes(): " << block_aws_accum_sum.sizes() << std::endl;
-    std::cout << "block_aws_accum[0]: " << block_aws_accum[0] << std::endl;
-    std::cout << "block_aws_accum[1]: " << block_aws_accum[1] << std::endl;
-    std::cout << "block_aws_accum[2]: " << block_aws_accum[2] << std::endl;
-    std::cout << "block_aws_accum[3]: " << block_aws_accum[3] << std::endl;
-    std::cout << "block_aws_accum[4]: " << block_aws_accum[4] << std::endl;
+    // std::cout << "block_aws_accum.shape: " << block_aws_accum.sizes() << std::endl;
+
+
+    // std::cout << "block_aws_accum.sum(-2).shape: " << block_aws_accum_sum.sizes() << std::endl;
+    // std::cout << "block_aws_accum_sum.sizes(): " << block_aws_accum_sum.sizes() << std::endl;
+    // std::cout << "block_aws_accum[0]: " << block_aws_accum[0] << std::endl;
+    // std::cout << "block_aws_accum[1]: " << block_aws_accum[1] << std::endl;
+    // std::cout << "block_aws_accum[2]: " << block_aws_accum[2] << std::endl;
+    // std::cout << "block_aws_accum[3]: " << block_aws_accum[3] << std::endl;
+    // std::cout << "block_aws_accum[4]: " << block_aws_accum[4] << std::endl;
 
 
     return {out, block_aws};

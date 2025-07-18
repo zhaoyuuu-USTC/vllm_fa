@@ -17,7 +17,7 @@
 #include "mask.h"
 #include "dropout.h"
 #include "rotary.h"
-#include "attention_sum.h"
+#include "attention_sum_v1.h"
 
 namespace flash {
 
@@ -1145,11 +1145,18 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
     // The thread index.
     const int tidx = threadIdx.x;
 
-    constexpr int kBlockM = Kernel_traits::kBlockM;    // Query序列的分块大小    64
-    constexpr int kBlockN = Kernel_traits::kBlockN;    // Key 和 Value 序列的分块大小    128
-    constexpr int kHeadDim = Kernel_traits::kHeadDim;
-    constexpr int kNWarps = Kernel_traits::kNWarps;
+    constexpr int kBlockM = Kernel_traits::kBlockM;    // Query序列的分块大小    64   
+    constexpr int kBlockN = Kernel_traits::kBlockN;    // Key 和 Value 序列的分块大小    256
+    constexpr int kHeadDim = Kernel_traits::kHeadDim;  // 64
+    constexpr int kNWarps = Kernel_traits::kNWarps;    // 4
     
+
+    // // 输出params.head_dim, params.kBlockM, params.kBlockN
+    // printf("kHeadDim: %d\n", kHeadDim);
+    // printf("kBlockM: %d\n", kBlockM);
+    // printf("kBlockN: %d\n", kBlockN);
+    // printf("kNWarps: %d\n", kNWarps);
+
     // int N_Pages_Max = (params.max_num_pages_per_seq + 32 - 1) / 32 * 32;
 
     using GmemTiledCopyO = std::conditional_t<
@@ -1174,7 +1181,7 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
                             cute::ceil_div((m_block + 1) * kBlockM + binfo.actual_seqlen_k - binfo.actual_seqlen_q + params.window_size_right, kBlockN));
     }
 
-    printf("n_block_min: %d, n_block_max: %d\n", n_block_min, n_block_max);
+    // printf("n_block_min: %d, n_block_max: %d\n", n_block_min, n_block_max);
 
     // 当前的GPU块就只是处理 [n_block_min, n_block_max]之间的块
     if (n_block_min >= n_block_max) {  // This also covers the case where n_block_max <= 0
@@ -1198,7 +1205,6 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
         Tensor gAaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.block_awsaccum_ptr) + row_offset_awsaccum),
                                     Shape<Int<kBlockM>, Int<MaxPages>>{}, make_stride(MaxPages, _1{}));
         
-
         GmemTiledCopyO gmem_tiled_copy_Oaccum;
         auto gmem_thr_copy_Oaccum = gmem_tiled_copy_Oaccum.get_thread_slice(tidx);
         Tensor tOgOaccum = gmem_thr_copy_Oaccum.partition_D(gOaccum);
@@ -1311,10 +1317,11 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
     Tensor tSrQ  = thr_mma.partition_fragment_A(sQ);                           // (MMA,MMA_M,MMA_K)
     Tensor tSrK  = thr_mma.partition_fragment_B(sK);                           // (MMA,MMA_N,MMA_K)
     Tensor tOrVt  = thr_mma.partition_fragment_B(sVtNoSwizzle);                // (MMA, MMA_K,MMA_N)
-
     
     Tensor acc_o = partition_fragment_C(tiled_mma, Shape<Int<kBlockM>, Int<kHeadDim>>{});  // MMA, MMA_M, MMA_K
+    // printf("acc_o size: %d x %d x %d \n", int(size<0>(acc_o)), int(size<1>(acc_o)), int(size<2>(acc_o)));    4 x 1 x 8
     Tensor aws = partition_fragment_C(tiled_mma, Shape<Int<kBlockM>, Int<MaxPages>>{});  // MMA, MMA_M, MMA_K
+    // printf("aws size: %d x %d x %d \n", int(size<0>(aws)), int(size<1>(aws)), int(size<2>(aws)));            4 x 1 x 4   
     //
     // Copy Atom retiling
     //
@@ -1527,9 +1534,11 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
     // if (tidx == 0 && blockIdx.y == 0 && blockIdx.z == 0) { print(tKsK); }
     // __syncthreads();
     clear(acc_o);
+    clear(aws);
     // 这里的2 * size<1>(acc_o) 可以理解为 kNRows 的值  声明在两次循环之前
+    // 还是得在AttentionSumV1中设置一个记录的所有pages的attention weights sum的tensor
     flash::Softmax<2 * size<1>(acc_o)> softmax;
-    flash::AttentionSum<2 * size<1>(acc_o), MaxPages> attention_sum;
+    flash::AttentionSumV1<2 * size<1>(acc_o)> attention_sum_v1;
     // bool is_first_block = false;
     // bool is_last_block = true;
 
@@ -1551,6 +1560,7 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
     #pragma unroll
     for (int masking_step = 0; masking_step < n_masking_steps; ++masking_step, --n_block) {
         Tensor acc_s = partition_fragment_C(tiled_mma, Shape<Int<kBlockM>, Int<kBlockN>>{});  // (MMA=4, MMA_M, MMA_N)
+        // printf("acc_s size: %d x %d x %d \n", int(size<0>(acc_s)), int(size<1>(acc_s)), int(size<2>(acc_s)));    4 x 1 x 32
         clear(acc_s);
         flash::cp_async_wait<0>();
         __syncthreads();
@@ -1605,7 +1615,7 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
             cute::cp_async_fence();
         }
         
-        attention_sum.template update_sum_aw(acc_s, aws, n_block, params.page_block_size, kBlockN);
+        attention_sum_v1.template update_sum_aw(acc_s, aws, n_block, params.page_block_size, kBlockN);
         // // 将 row_sum_aw 写入 sum_aw
         // if (sum_aw != nullptr) {
         //     // sum_aw 的类型为 float*，row_sum_aw 是 Tensor
@@ -1643,6 +1653,7 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
     for (; n_block >= n_block_min; --n_block) {
         Tensor acc_s = partition_fragment_C(tiled_mma, Shape<Int<kBlockM>, Int<kBlockN>>{});  // (MMA=4, MMA_M, MMA_N)
         clear(acc_s);
+        // printf("acc_s size: %d x %d x %d \n", int(size<0>(acc_s)), int(size<1>(acc_s)), int(size<2>(acc_s)));   4 x 1 x 32
         flash::cp_async_wait<0>();
         __syncthreads();
         // Advance gV
@@ -1682,7 +1693,7 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
         mask.template apply_mask</*Causal_mask=*/false>(
             acc_s, n_block * kBlockN, m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4, kNWarps * 16
         );
-        attention_sum.template update_sum_aw(acc_s, aws, n_block, params.page_block_size, kBlockN);
+        attention_sum_v1.template update_sum_aw(acc_s, aws, n_block, params.page_block_size, kBlockN);
         // attention_sum.template update_sum_aw</*n_block_min=*/n_block_min, /*n_block_max=*/n_block_max, /*page_block_size=*/params.page_block_size>(acc_s, n_block);
 
         softmax.template softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_local>(acc_s, acc_o, params.scale_softmax_log2);
@@ -1819,15 +1830,6 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
 
     ///////////////////////////////////////////////////////////////
     Tensor gAaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.block_awsaccum_ptr) + row_offset_awsaccum), Shape<Int<kBlockM>, Int<MaxPages>>{}, make_stride(MaxPages, _1{}));
-    
-//  // 初始化gAaccum, 返回的大部分是1，因为block_aws初始化的时候为1，所以问题在后续的代码中
-//  #pragma unroll
-//  for (int m = 0; m < size<0>(gAaccum); ++m) {
-//      #pragma unroll
-//      for (int n = 0; n < size<1>(gAaccum); ++n) {
-//          gAaccum(m, n) = ElementAccum(1);
-//      }
-//  }
 
     GmemTiledCopyO gmem_tiled_copy_Aaccum;
     auto gmem_thr_copy_Aaccum = gmem_tiled_copy_Aaccum.get_thread_slice(tidx);
@@ -1891,12 +1893,14 @@ inline __device__ void compute_attn_splitkv(const Params &params) {
 
 template<typename Kernel_traits, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K, bool Is_softcap, bool Split, bool Append_KV, int MaxPages, typename Params>
 inline __device__ void compute_attn_splitkv_aws(const Params &params) {
-    const int m_block = blockIdx.x;   // 负责处理第几个query block, 对应处理哪些query tokens
+    // 负责处理第几个query block, 对应处理哪些query tokens  num_m_block, grid的第一个维度
+    const int m_block = blockIdx.x;  
     // The block index for the batch.
-    const int bidb = Split ? blockIdx.z / params.h : blockIdx.y;
+    // grid第三个维度是 params.b * params.h
+    const int bidb = Split ? blockIdx.z / params.h : blockIdx.y;  // grid第三个维度
     // The block index for the head.
     const int bidh = Split ? blockIdx.z - bidb * params.h : blockIdx.z;
-    const int n_split_idx = Split ? blockIdx.y : 0;
+    const int n_split_idx = Split ? blockIdx.y : 0;  
     const int num_n_splits = Split ? gridDim.y : 1;
     flash::compute_attn_1rowblock_splitkv_aws<Kernel_traits, Is_causal, Is_local, Has_alibi, Is_even_MN, Is_even_K, Is_softcap, Split, Append_KV, MaxPages>(params, bidb, bidh, m_block, n_split_idx, num_n_splits);
 }

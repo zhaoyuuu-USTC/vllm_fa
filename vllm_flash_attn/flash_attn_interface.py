@@ -1396,7 +1396,7 @@ def flash_attn_with_kvcache_aws(
     # 强制输出params，无论return_softmax_lse是否为True
     # print(f"params: {params}")
     # print(f"out: {out.shape}, softmax_lse: {softmax_lse.shape}")
-    print(f"block_aws: {block_aws.shape}")
+    # print(f"block_aws: {block_aws.shape}")
     # print(f"block_aws: {block_aws}")
-    print(f"out: {out.shape}")
+    # print(f"out: {out.shape}")
     return block_aws

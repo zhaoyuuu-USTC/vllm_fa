@@ -17,7 +17,7 @@ using namespace cute;
 
 
 template<typename Engine0, typename Layout0, typename Engine1, typename Layout1, typename Operator>
-__device__ __forceinline__ void thread_aws_reduce_(Tensor<Engine0, Layout0> const &acc_s, Tensor<Engine1, Layout1> &row_sum, Operator &op) {
+__device__ __forceinline__ void thread_aws_reduce_PLB_(Tensor<Engine0, Layout0> const &acc_s, Tensor<Engine1, Layout1> &row_sum, Operator &op) {
     static_assert(Layout0::rank == 2, "Only support 2D Tensor");
     static_assert(Layout1::rank == 1, "Only support 1D Tensor");
     CUTE_STATIC_ASSERT_V(size<0>(row_sum) == size<0>(acc_s));
@@ -32,7 +32,7 @@ __device__ __forceinline__ void thread_aws_reduce_(Tensor<Engine0, Layout0> cons
 
 
 template<typename Engine0, typename Layout0, typename Engine1, typename Layout1, typename Operator>
-__device__ __forceinline__ void quad_aws_allreduce_(Tensor<Engine0, Layout0> &dst, Tensor<Engine1, Layout1> &src, Operator &op) {
+__device__ __forceinline__ void quad_aws_allreduce_PLB_(Tensor<Engine0, Layout0> &dst, Tensor<Engine1, Layout1> &src, Operator &op) {
     CUTE_STATIC_ASSERT_V(size(dst) == size(src));
     #pragma unroll
     for (int i = 0; i < size(dst); i++){
@@ -62,9 +62,9 @@ struct AttentionSumPLB_V1 {
 
         AbsSumOp<float> abs_sum_op;
         
-        flash::template thread_aws_reduce_(scores, row_sum_aw, abs_sum_op);
+        flash::template thread_aws_reduce_PLB_(scores, row_sum_aw, abs_sum_op);
         
-        flash::template quad_aws_allreduce_(row_sum_aw, row_sum_aw, abs_sum_op);
+        flash::template quad_aws_allreduce_PLB_(row_sum_aw, row_sum_aw, abs_sum_op);
         
         #pragma unroll
         for (int mi = 0; mi < size<0>(row_sum_aw); mi++) {

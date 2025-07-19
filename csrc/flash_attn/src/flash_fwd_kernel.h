@@ -1748,7 +1748,7 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
     // sOaccum is larger than sQ, so we need to syncthreads here
     // TODO: allocate enough smem for sOaccum
     if constexpr (Split) { __syncthreads(); }
-    // register到shared memory是无需offset的
+
     cute::copy(smem_tiled_copy_Oaccum, taccOrOaccum, taccOsOaccum);
 
     const index_t row_offset_o = binfo.q_offset(params.o_batch_stride, params.o_row_stride, bidb)
@@ -1760,14 +1760,16 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
             ((n_split_idx * params.b + bidb) * params.h + bidh) * params.seqlen_q : bidh * params.total_q + binfo.q_offset(params.seqlen_q, 1, bidb)
         ) + m_block * kBlockM;
     
-    // const index_t row_offset_row_sum_accum = (((n_split_idx * params.b + bidb) * params.h + bidh) * params.seqlen_q 
-    //                                               + m_block * kBlockM) * params.max_num_pages_per_seq;
+    const index_t row_offset_awsaccum = (((n_split_idx * params.b + bidb) * params.h + bidh) * params.seqlen_q 
+                                        + m_block * kBlockM) * MaxPages;
 
     Tensor gOaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementO *>(Split ? params.oaccum_ptr : params.o_ptr) + (Split ? row_offset_oaccum : row_offset_o)),
                                 Shape<Int<kBlockM>, Int<kHeadDim>>{},
                                 make_stride(Split ? kHeadDim : params.o_row_stride, _1{}));
     Tensor gLSEaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(Split ? params.softmax_lseaccum_ptr : params.softmax_lse_ptr) + row_offset_lseaccum),
                                 Shape<Int<kBlockM>>{}, Stride<_1>{});
+
+    Tensor gAaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.block_awsaccum_ptr) + row_offset_awsaccum), Shape<Int<kBlockM>, Int<MaxPages>>{}, make_stride(MaxPages, _1{}));
 
 
     GmemTiledCopyO gmem_tiled_copy_Oaccum;
@@ -1787,12 +1789,18 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
     // Convert to ((2, 2), MMA_M, MMA_K) then take only the row indices.
     Tensor taccOcO_row = logical_divide(taccOcO, Shape<_2>{})(make_coord(0, _), _, 0);
     CUTE_STATIC_ASSERT_V(size(lse) == size(taccOcO_row));                     // MMA_M
+    CUTE_STATIC_ASSERT_V(size<0>(aws) == size(taccOcO_row));                     // MMA_M
     // 只有在当前线程负责的tile(块)在tile的第一列时，这个线程才负责写回lse
     if (get<1>(taccOcO_row(0)) == 0) {
         #pragma unroll
         for (int mi = 0; mi < size(lse); ++mi) {
             const int row = get<0>(taccOcO_row(mi));
-            if (row < binfo.actual_seqlen_q - m_block * kBlockM) { gLSEaccum(row) = lse(mi); }
+            if (row < binfo.actual_seqlen_q - m_block * kBlockM) { 
+                gLSEaccum(row) = lse(mi); 
+                for (int ni = 0; ni < MaxPages; ni++) {
+                    gAaccum(row, ni) = aws(mi, ni);
+                }
+            }
         }
     }
 
@@ -1809,6 +1817,12 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
     flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
         gmem_tiled_copy_Oaccum, tOrOaccum, tOgOaccum, tOcO, tOpO, binfo.actual_seqlen_q - m_block * kBlockM
     );
+    /////////////////////////////////////////////////////////////////
+
+
+
+
+
 
     // ///////////////////////////////////////////////////////////////
     // // auto gAaccum_layout = make_layout(Shape<Int<kBlockM>, Int<N_Pages_Max>>{}, make_stride(N_Pages_Max, _1{}));
@@ -1953,6 +1967,12 @@ inline __device__ void combine_attn_seqk_parallel(const Params &params) {
     Layout final_layout = cute::composition(remapped_layout, cute::composition(orig_layout, flat_layout));
 
     Tensor gLSE_unpadded = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.softmax_lse_ptr)), final_layout);
+
+    // printf("gLSE_unpadded shape: [%d, %d, %d]\n", 
+    //     int(size<0>(gLSE_unpadded)), int(size<1>(gLSE_unpadded)), int(size<2>(gLSE_unpadded)));   [4, 2, 1]
+
+    // printf("gLSE_unpadded stride: [%d, %d, %d]\n", 
+        // int(get<0>(stride<0>(gLSE_unpadded))), int(get<0>(stride<1>(gLSE_unpadded))), int(get<0>(stride<2>(gLSE_unpadded))));  [1, 4, 4]
 
     // 每个线程要处理的块的数量
     constexpr int kNLsePerThread = (kMaxSplits * kBlockM + kNThreads - 1) / kNThreads;
@@ -2152,15 +2172,29 @@ inline __device__ void combine_attn_seqk_parallel_aws(const Params &params) {
     // This tensor's layout maps row_offset_lse to {bidb, bidh, q_offset}.
     Tensor gLSE = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.softmax_lse_ptr) + row_offset_lse),
                             Shape<Int<kBlockM>>{}, Stride<_1>{});
+    
+    // 输出gLSEaccum和gLSE的维度
+    // printf("gLSEaccum shape: [%d, %d], stride: [%d, %d]\n", 
+    //     int(size<0>(gLSEaccum)), int(size<1>(gLSEaccum)), 
+    //     int(stride<0>(gLSEaccum)), int(stride<1>(gLSEaccum)));      shape: [16, 8] stride: [8, 1]
+    // printf("gLSE shape: [%d], stride: [%d]\n", 
+    //     int(size<0>(gLSE)), int(stride<0>(gLSE)));                  shape: [8] stride: [1]
 
     // This layout maps row_offset_lse to {bidh, q_offset, bidb} or {bidh, bidb, q_offset}.
     Layout flat_layout = make_layout(lse_size);        // 
+
     Layout orig_layout = make_layout(make_shape(params.seqlen_q, params.h, params.b));
+
     auto transposed_stride = params.seqlenq_ngroups_swapped ? make_stride(params.b, params.seqlen_q * params.b, 1) : make_stride(1, params.seqlen_q * params.b, params.seqlen_q);
     Layout remapped_layout = make_layout(make_shape(params.seqlen_q, params.h, params.b), transposed_stride);
     Layout final_layout = cute::composition(remapped_layout, cute::composition(orig_layout, flat_layout));
 
     Tensor gLSE_unpadded = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.softmax_lse_ptr)), final_layout);
+
+    // printf("gLSE_unpadded shape: [%d, %d, %d]", 
+        // int(size<0>(gLSE_unpadded)), int(size<1>(gLSE_unpadded)), int(size<2>(gLSE_unpadded)));   [4, 2, 1]
+    // printf("gLSE_unpadded stride: [%d, %d, %d]\n", 
+        // int(get<0>(stride<0>(gLSE_unpadded))), int(get<0>(stride<1>(gLSE_unpadded))), int(get<0>(stride<2>(gLSE_unpadded))));  [1, 4, 4]
 
     // 每个线程要处理的块的数量
     constexpr int kNLsePerThread = (kMaxSplits * kBlockM + kNThreads - 1) / kNThreads;
@@ -2172,7 +2206,7 @@ inline __device__ void combine_attn_seqk_parallel_aws(const Params &params) {
         const int row = l * kRowsPerLoadLSE + tidx / kBlockM;
         const int col = tidx % kBlockM;
         ElementAccum lse = (row < params.num_splits && col < lse_size - bidx * kBlockM) ? gLSEaccum(row, col) : -INFINITY;
-        if (row < kMaxSplits) { sLSE[row][col] = lse; }   // 共享内存读到全局内存
+        if (row < kMaxSplits) { sLSE[row][col] = lse; }   
         // if (bidx == 0 && tidx < 32) { printf("tidx = %d, row = %d, col = %d, lse = %f\n", tidx, row, col, lse); }
     }
     // if (bidx == 1 && tidx < 32) { printf("tidx = %d, row_offset_lse = %d, lse = %f\n", tidx, row_offset_lse, lse_accum(0)); }
@@ -2240,7 +2274,11 @@ inline __device__ void combine_attn_seqk_parallel_aws(const Params &params) {
     Tensor gOaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.oaccum_ptr) + row_offset_oaccum),
                                 Shape<Int<kBlockM>, Int<kHeadDim>>{},
                                 Stride<Int<kHeadDim>, _1>{});
+    // 输出gOaccum的形状
 
+    // printf("gOaccum shape: (%d, %d)\n", int(size<0>(gOaccum)), int(size<1>(gOaccum)));   (8, 64)
+    // printf("gOaccum stride: (%d, %d)\n", int(stride<0>(gOaccum)), int(stride<1>(gOaccum))); (64, 1)
+    
     // kBlockN = 每行分配的线程数量， kBlockM = 每个block处理的query tokens的行数 
     constexpr int kBlockN = kNThreads / kBlockM;
 
@@ -2295,6 +2333,8 @@ inline __device__ void combine_attn_seqk_parallel_aws(const Params &params) {
 
     // 这里是累积完成
     Tensor rO = flash::convert_type<Element>(tOrO);
+    // 输出rO的shape
+    // printf("rO shape: [%d, %d, %d]\n", int(size<0>(rO)), int(size<1>(rO)), int(size<2>(rO)));   [4, 1, 1]
     // Write to gO
     #pragma unroll
     for (int m = 0; m < size<1>(rO); ++m) {
@@ -2321,21 +2361,28 @@ inline __device__ void combine_attn_seqk_parallel_aws(const Params &params) {
         }
     }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    // 这里可以根据需要进行reduce、写回unpad等操作，参考LSE的写法
+
+    // printf("gAWS_unpadded shape: [%d, %d, %d, %d] \n", 
+        // int(size<0>(gAWS_unpadded)), int(size<1>(gAWS_unpadded)), int(size<2>(gAWS_unpadded)), int(size<3>(gAWS_unpadded))); [4, 2, 1, 32]
+    // printf("gAWS_unpadded stride: [%d, %d, %d, %d]\n", 
+        // int(get<0>(stride<0>(gAWS_unpadded))), get<0>(stride<1>(gAWS_unpadded)), get<0>(stride<2>(gAWS_unpadded)), get<0>(stride<3>(gAWS_unpadded))); [1, 4, 32, 1]
+
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
     __syncthreads();
 
-    // constexpr int N_Pages_Max = (params.max_num_pages_per_seq + 32 - 1) / 32 * 32;
+//     // constexpr int N_Pages_Max = (params.max_num_pages_per_seq + 32 - 1) / 32 * 32;
 
     const index_t row_offset_aaccum = bidx * kBlockM * MaxPages;
     
     Tensor gAaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.block_awsaccum_ptr) + row_offset_aaccum), Shape<Int<kBlockM>, Int<MaxPages>>{}, Stride<Int<MaxPages>, _1>{});
-    // 将gAaccum全部元素设为1    // 如果block_aws还是1，则是后面的问题，awsaccum的问题，不是1，则是前面的问题
-//  #pragma unroll
-//  for (int m = 0; m < size<0>(gAaccum); ++m) {
-//      #pragma unroll
-//      for (int n = 0; n < size<1>(gAaccum); ++n) {
-//          gAaccum(m, n) = ElementAccum(1);
-//      }
-//  }
+    // 输出gAaccum的形状
+    // printf("gAaccum shape: [%d, %d]\n", 
+        // int(size<0>(gAaccum)), int(size<1>(gAaccum)));     (8, 32)
+    // printf("gAaccum stride: [%d, %d]\n", int(stride<0>(gAaccum)), int(stride<1>(gAaccum)));   (32, 1)
+
     // constexpr int kBlockN = kNThreads / kBlockM;
 
     using GmemLayoutAtomAaccum = Layout<Shape<Int<kBlockM>, Int<kBlockN>>, Stride<Int<kBlockN>, _1>>;
@@ -2382,6 +2429,8 @@ inline __device__ void combine_attn_seqk_parallel_aws(const Params &params) {
     }
 
     Tensor rA = flash::convert_type<Element>(tArA);
+    // 输出rA的shape
+    // printf("rA shape: [%d, %d, %d]\n", int(size<0>(rA)), int(size<1>(rA)), int(size<2>(rA)));   [4, 1, 1]
     // write to gA
     #pragma unroll
     for (int m = 0; m < size<1>(rA); ++m) {
@@ -2401,7 +2450,7 @@ inline __device__ void combine_attn_seqk_parallel_aws(const Params &params) {
                     // copy(rA(_, m, k), gA);   原版是复制，这里改成了加法
 
                     // 这里改成了加法，且block_aws初始化为1，总体返回是1，因此rA是0
-                    #pragma unroll
+                    // #pragma unroll
                     for (int i = 0; i < size<0>(rA); ++i) {
                         gA(i) += rA(i, m, k);
                     }

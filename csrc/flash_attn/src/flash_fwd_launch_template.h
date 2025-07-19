@@ -193,21 +193,21 @@
          dim3 grid_combine((params.b * params.h * params.seqlen_q + kBlockM - 1) / kBlockM);
          EVENK_SWITCH(is_even_K, IsEvenKConst, [&] {
              // MAXPAGES_SWITCH(params.max_num_pages_per_seq, [&] {
-            //  constexpr int MaxPages = 32;
+             constexpr int MaxPages = 32;
              if (params.num_splits <= 2) {
-                 flash_fwd_splitkv_combine_kernel<Kernel_traits, kBlockM, 1, IsEvenKConst><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
+                 flash_fwd_splitkv_combine_kernel_aws<Kernel_traits, kBlockM, 1, IsEvenKConst, MaxPages><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
              } else if (params.num_splits <= 4) {
-                 flash_fwd_splitkv_combine_kernel<Kernel_traits, kBlockM, 2, IsEvenKConst><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
+                 flash_fwd_splitkv_combine_kernel_aws<Kernel_traits, kBlockM, 2, IsEvenKConst, MaxPages><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
              } else if (params.num_splits <= 8) {
-                 flash_fwd_splitkv_combine_kernel<Kernel_traits, kBlockM, 3, IsEvenKConst><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
+                 flash_fwd_splitkv_combine_kernel_aws<Kernel_traits, kBlockM, 3, IsEvenKConst, MaxPages><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
              } else if (params.num_splits <= 16) {
-                 flash_fwd_splitkv_combine_kernel<Kernel_traits, kBlockM, 4, IsEvenKConst><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
+                 flash_fwd_splitkv_combine_kernel_aws<Kernel_traits, kBlockM, 4, IsEvenKConst, MaxPages><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
              } else if (params.num_splits <= 32) {
-                 flash_fwd_splitkv_combine_kernel<Kernel_traits, kBlockM, 5, IsEvenKConst><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
+                 flash_fwd_splitkv_combine_kernel_aws<Kernel_traits, kBlockM, 5, IsEvenKConst, MaxPages><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
              } else if (params.num_splits <= 64) {
-                 flash_fwd_splitkv_combine_kernel<Kernel_traits, kBlockM, 6, IsEvenKConst><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
+                 flash_fwd_splitkv_combine_kernel_aws<Kernel_traits, kBlockM, 6, IsEvenKConst, MaxPages><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
              } else if (params.num_splits <= 128) {
-                 flash_fwd_splitkv_combine_kernel<Kernel_traits, kBlockM, 7, IsEvenKConst><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
+                 flash_fwd_splitkv_combine_kernel_aws<Kernel_traits, kBlockM, 7, IsEvenKConst, MaxPages><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
              }
              C10_CUDA_KERNEL_LAUNCH_CHECK();
              // });

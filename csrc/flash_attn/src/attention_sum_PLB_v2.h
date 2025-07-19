@@ -63,15 +63,23 @@ struct AttentionSumPLB_V2 {
 
         // 这个是page_size更大的场景，每个block只对应一个page, Page_size larger than kBlockN
         int page_nums = kBlockN / page_block_size;
+        int start_page_index = n_block * kBlockN / page_block_size;
 
         AbsSumOp<float> abs_sum_op;
         for (int i = 0; i < page_nums; i++) {
             clear(row_sum_aw);
-            flash::template thread_aws_reduce_PLB_v2_(scores, row_sum_aw, abs_sum_op);
+
+            int page_index = start_page_index + i;
+
+            auto scores_page = make_tensor(scores.data() + page_index * page_block_size, Shape<Int<KMRows>, Int<page_block_size>>{});
+
+            flash::template thread_aws_reduce_PLB_v2_(scores_page, row_sum_aw, abs_sum_op);
+
             flash::template quad_aws_allreduce_PLB_v2_(row_sum_aw, row_sum_aw, abs_sum_op);
+
             #pragma unroll
             for (int mi = 0; mi < size<0>(row_sum_aw); mi++) {
-                aws(mi, i) += row_sum_aw(mi);
+                aws(mi, page_index) += row_sum_aw(mi);
             }
         }
 

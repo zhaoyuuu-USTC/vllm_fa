@@ -1817,60 +1817,7 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
     flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
         gmem_tiled_copy_Oaccum, tOrOaccum, tOgOaccum, tOcO, tOpO, binfo.actual_seqlen_q - m_block * kBlockM
     );
-    /////////////////////////////////////////////////////////////////
-
-
-
-
-
-
-    // ///////////////////////////////////////////////////////////////
-    // // auto gAaccum_layout = make_layout(Shape<Int<kBlockM>, Int<N_Pages_Max>>{}, make_stride(N_Pages_Max, _1{}));
-    // Tensor sAaccum = make_tensor(make_smem_ptr(reinterpret_cast<ElementAccum *>(smem_)), typename Kernel_traits::SmemLayoutO{});  // 共享内存 Shape<Int<kBlockM>, Int<kHeadDim>>
-
-    // using SmemTiledCopyA = std::conditional_t<
-    //     !Split,
-    //     typename Kernel_traits::SmemCopyAtomO,        // 普通路径
-    //     typename Kernel_traits::SmemCopyAtomOaccum    // Split-K 路径
-    // >;
-    // auto smem_tiled_copy_Aaccum = make_tiled_copy_C(SmemTiledCopyA{}, tiled_mma);
-    // auto smem_thr_copy_Aaccum = smem_tiled_copy_Aaccum.get_thread_slice(tidx);
-    // Tensor rA = flash::convert_type<ElementO>(aws);
-
-    // Tensor tAWSrAaccum = smem_thr_copy_Aaccum.retile_S(rA);
-    // Tensor tAWSsAaccum = smem_thr_copy_Aaccum.partition_D(sAaccum);
-
-    // if constexpr (Split) { __syncthreads(); }
-    // cute::copy(smem_tiled_copy_Aaccum, tAWSrAaccum, tAWSsAaccum);
-
-    // const index_t row_offset_awsaccum = (((n_split_idx * params.b + bidb) * params.h + bidh) * params.seqlen_q
-    //                                     + m_block * kBlockM) * MaxPages;
-
-    // ///////////////////////////////////////////////////////////////
-    // Tensor gAaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.block_awsaccum_ptr) + row_offset_awsaccum), Shape<Int<kBlockM>, Int<MaxPages>>{}, make_stride(MaxPages, _1{}));
-
-    // GmemTiledCopyO gmem_tiled_copy_Aaccum;
-    // auto gmem_thr_copy_Aaccum = gmem_tiled_copy_Aaccum.get_thread_slice(tidx);
-    // Tensor tAsAaccum = gmem_thr_copy_Aaccum.partition_S(sAaccum);
-    // Tensor tAgAaccum = gmem_thr_copy_Aaccum.partition_D(gAaccum);
-
-    // __syncthreads();
-
-    // Tensor tArAaccum = make_tensor<ElementO>(shape(tAgAaccum));
-    // cute::copy(gmem_tiled_copy_Aaccum, tAsAaccum, tArAaccum);
-
-    // Tensor cA = make_identity_tensor(make_shape(size<0>(sAaccum), size<1>(sAaccum)));
-    // Tensor tAcA = gmem_thr_copy_Aaccum.partition_D(cA);
-    // Tensor tApA = make_tensor<bool>(make_shape(size<2>(tAgAaccum)));
-
-    // if (!Is_even_K) {
-    //     #pragma unroll
-    //     for (int k = 0; k < size(tApA); ++k) { tApA(k) = get<1>(tAcA(0, 0, k)) < MaxPages; }
-    // }
-
-    // flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
-    //     gmem_tiled_copy_Aaccum, tArAaccum, tAgAaccum, tAcA, tApA, binfo.actual_seqlen_q - m_block * kBlockM
-    // );
+    
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

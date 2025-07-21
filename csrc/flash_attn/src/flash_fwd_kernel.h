@@ -19,6 +19,7 @@
 #include "rotary.h"
 #include "attention_sum_v1.h"
 #include "attention_sum_PLB_v1.h"
+#include "attention_sum_PLB_v2.h"
 
 namespace flash {
 
@@ -1538,7 +1539,7 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
     // 这里的2 * size<1>(acc_o) 可以理解为 kNRows 的值  声明在两次循环之前
     // 还是得在AttentionSumV1中设置一个记录的所有pages的attention weights sum的tensor
     flash::Softmax<2 * size<1>(acc_o)> softmax;
-    flash::AttentionSumPLB_V1<2 * size<1>(acc_o), MaxPages> attention_sum_PLB_v1;
+    flash::AttentionSumPLB_V2<2 * size<1>(acc_o), MaxPages> attention_sum_PLB_v2;
     // bool is_first_block = false;
     // bool is_last_block = true;
 
@@ -1615,7 +1616,7 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
             cute::cp_async_fence();
         }
         
-        attention_sum_PLB_v1.template update_sum_aw(acc_s, n_block, params.page_block_size, kBlockN);
+        attention_sum_PLB_v2.template update_sum_aw(acc_s, n_block, params.page_block_size, kBlockN);
         // // 将 row_sum_aw 写入 sum_aw
         // if (sum_aw != nullptr) {
         //     // sum_aw 的类型为 float*，row_sum_aw 是 Tensor
@@ -1693,7 +1694,7 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
         mask.template apply_mask</*Causal_mask=*/false>(
             acc_s, n_block * kBlockN, m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4, kNWarps * 16
         );
-        attention_sum_PLB_v1.template update_sum_aw(acc_s, n_block, params.page_block_size, kBlockN);
+        attention_sum_PLB_v2.template update_sum_aw(acc_s, n_block, params.page_block_size, kBlockN);
         // attention_sum.template update_sum_aw</*n_block_min=*/n_block_min, /*n_block_max=*/n_block_max, /*page_block_size=*/params.page_block_size>(acc_s, n_block);
 
         softmax.template softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_local>(acc_s, acc_o, params.scale_softmax_log2);
@@ -1724,7 +1725,7 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
     Tensor lse = softmax.template normalize_softmax_lse</*Is_dropout=*/false, Split>(acc_o, params.scale_softmax);
     // if (cute::thread0()) { print(lse); }
 
-    auto aws = attention_sum_PLB_v1.get_attention_weights_sum();
+    auto aws = attention_sum_PLB_v2.get_attention_weights_sum();
 
     // printf("aws size: %d x %d \n", int(size<0>(aws)), int(size<1>(aws)));    2 x 32
     // printf("acc_o size: %d x %d x %d \n", int(size<0>(acc_o)), int(size<1>(acc_o)), int(size<2>(acc_o)));  4 x 1 x 8

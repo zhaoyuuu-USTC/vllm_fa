@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 NUM_HEADS = [(8, 2)]
 HEAD_SIZES = [64]
-BLOCK_SIZES = [512]
+BLOCK_SIZES = [128]
 DTYPES = [torch.float16]
 # one value large enough to test overflow in index calculation.
 # one value small enough to test the schema op check

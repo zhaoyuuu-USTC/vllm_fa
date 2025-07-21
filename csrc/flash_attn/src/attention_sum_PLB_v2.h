@@ -11,10 +11,6 @@
 
 #include <cstdio>
 
-'''
-这里的逻辑是page_size < kBlockN, 每个block对应多个page
-'''
-
 namespace flash {
 
 using namespace cute;
@@ -62,18 +58,30 @@ struct AttentionSumPLB_V2 {
         static_assert(decltype(size<0>(scores))::value == KMRows);
 
         // 这个是page_size更大的场景，每个block只对应一个page, Page_size larger than kBlockN
+
         int page_nums = kBlockN / page_block_size;
+        // printf("page_nums: %d, kBlockN: %d, page_block_size: %d\n", page_nums, kBlockN, page_block_size);
         int start_page_index = n_block * kBlockN / page_block_size;
 
         AbsSumOp<float> abs_sum_op;
+
         for (int i = 0; i < page_nums; i++) {
             clear(row_sum_aw);
 
             int page_index = start_page_index + i;
-
-            auto scores_page = make_tensor(scores.data() + page_index * page_block_size, Shape<Int<KMRows>, Int<page_block_size>>{});
-
-            flash::template thread_aws_reduce_PLB_v2_(scores_page, row_sum_aw, abs_sum_op);
+            // printf("page_index: %d\n", page_index);
+            // 256 / 128  == 2
+            int start_index = i * page_block_size;
+            int end_index = (i+1) * page_block_size;
+            // 直接使用原始scores张量，通过索引访问对应的页面数据
+            // 避免创建依赖于运行时值的张量形状
+            #pragma unroll
+            for (int ni = start_index; ni < end_index; ni++) {
+                #pragma unroll
+                for (int mi = 0; mi < KMRows; mi++) {
+                    row_sum_aw(mi) = abs_sum_op(row_sum_aw(mi), scores(mi, ni));
+                }
+            }
 
             flash::template quad_aws_allreduce_PLB_v2_(row_sum_aw, row_sum_aw, abs_sum_op);
 
@@ -82,7 +90,10 @@ struct AttentionSumPLB_V2 {
                 aws(mi, page_index) += row_sum_aw(mi);
             }
         }
-
+        // 输出row_sum_aw
+        for (int mi = 0; mi < size<0>(row_sum_aw); mi++) {
+            printf("row_sum_aw[%d] = %f\n", mi, static_cast<float>(row_sum_aw(mi)));
+        }
         clear(row_sum_aw);
     };
 

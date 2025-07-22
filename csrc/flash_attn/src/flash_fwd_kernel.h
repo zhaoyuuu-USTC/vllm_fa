@@ -18,7 +18,7 @@
 #include "dropout.h"
 #include "rotary.h"
 #include "attention_sum_v1.h"
-#include "attention_sum_PLB_v1.h"
+// #include "attention_sum_PLB_v1.h"
 #include "attention_sum_PLB_v2.h"
 
 namespace flash {
@@ -1615,7 +1615,7 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
             // isn't right and we get race conditions.
             cute::cp_async_fence();
         }
-        
+        // printf("masking: acc_s.shape: %d x %d x %d\n", int(size<0>(acc_s)), int(size<1>(acc_s)), int(size<2>(acc_s)));
         attention_sum_PLB_v2.template update_sum_aw(acc_s, n_block, params.page_block_size, kBlockN);
         // // 将 row_sum_aw 写入 sum_aw
         // if (sum_aw != nullptr) {
@@ -1694,6 +1694,7 @@ inline __device__ void compute_attn_1rowblock_splitkv_aws(const Params &params, 
         mask.template apply_mask</*Causal_mask=*/false>(
             acc_s, n_block * kBlockN, m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4, kNWarps * 16
         );
+        printf("normal: acc_s.shape: %d x %d x %d\n", int(size<0>(acc_s)), int(size<1>(acc_s)), int(size<2>(acc_s)));
         attention_sum_PLB_v2.template update_sum_aw(acc_s, n_block, params.page_block_size, kBlockN);
         // attention_sum.template update_sum_aw</*n_block_min=*/n_block_min, /*n_block_max=*/n_block_max, /*page_block_size=*/params.page_block_size>(acc_s, n_block);
 

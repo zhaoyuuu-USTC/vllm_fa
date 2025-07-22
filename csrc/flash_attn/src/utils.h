@@ -106,15 +106,25 @@
  
  ////////////////////////////////////////////////////////////////////////////////////////////////////
  
- template<typename T>
- struct AbsSumOp {
- __device__ __forceinline__ T operator()(T const & x, T const & y) const{ 
-     T x_val = isinf(x) ? T(0.0f) : x;
-     T y_val = isinf(y) ? T(0.0f) : y;
-     return fabs(x_val) + fabs(y_val); 
-     }
- };
+//  template<typename T>
+//  struct AbsSumOp {
+//  __device__ __forceinline__ T operator()(T const & x, T const & y) const{ 
+//     T x_val = (isnan(x) || isinf(x)) ? T(0.0f) : fabs(x);
+//     T y_val = (isnan(y) || isinf(y)) ? T(0.0f) : fabs(y);
+//     return x_val + y_val; 
+//     }
+//  };
  
+
+template<typename T>
+struct AbsSumOp {
+__device__ __forceinline__ T operator()(T const &x, T const &y) const {
+    const T threshold = T(1e7);  // 可以调大
+    T x_val = (isnan(x) || isinf(x) || fabs(x) > threshold) ? T(0.0f) : fabs(x);
+    T y_val = (isnan(y) || isinf(y) || fabs(y) > threshold) ? T(0.0f) : fabs(y);
+    return x_val + y_val;
+    }
+};
  ////////////////////////////////////////////////////////////////////////////////////////////////////
  
  template<int THREADS>

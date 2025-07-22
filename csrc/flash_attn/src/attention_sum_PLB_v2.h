@@ -56,7 +56,7 @@ struct AttentionSumPLB_V2 {
 
         Tensor scores = make_tensor(acc_s.data(), flash::convert_layout_acc_rowcol(acc_s.layout()));
         static_assert(decltype(size<0>(scores))::value == KMRows);
-
+        // printf("ASPLB_V2  KMRows: %d, scores.shape: %d x %d\n", KMRows, int(size<0>(scores)), int(size<1>(scores))); 2 x 64
         // 这个是page_size更大的场景，每个block只对应一个page, Page_size larger than kBlockN
 
         int page_nums = kBlockN / page_block_size;
@@ -65,6 +65,7 @@ struct AttentionSumPLB_V2 {
 
         AbsSumOp<float> abs_sum_op;
 
+        #pragma unroll
         for (int i = 0; i < page_nums; i++) {
             clear(row_sum_aw);
 
@@ -73,26 +74,34 @@ struct AttentionSumPLB_V2 {
             // 256 / 128  == 2
             int start_index = i * page_block_size;
             int end_index = (i+1) * page_block_size;
+            // printf(" start_page_index: %d, page_index: %d, start_index: %d, end_index: %d\n", start_page_index, page_index, start_index, end_index);
             // 直接使用原始scores张量，通过索引访问对应的页面数据
             // 避免创建依赖于运行时值的张量形状
             #pragma unroll
-            for (int ni = start_index; ni < end_index; ni++) {
+            for (int mi = 0; mi < KMRows; mi++) {
                 #pragma unroll
-                for (int mi = 0; mi < KMRows; mi++) {
+                for (int ni = start_index; ni < end_index; ni++) {
                     row_sum_aw(mi) = abs_sum_op(row_sum_aw(mi), scores(mi, ni));
-                }
-            }
+                    // printf
 
+                }
+                // printf("start_index: %d, end_index: %d, row_sum_aw[%d] = %f\n", start_index, end_index, mi, static_cast<float>(row_sum_aw(mi)));
+            }
+            
+            printf("row_sum_aw[0] = %f, row_sum_aw[1] = %f\n", static_cast<float>(row_sum_aw(0)), static_cast<float>(row_sum_aw(1)));
             flash::template quad_aws_allreduce_PLB_v2_(row_sum_aw, row_sum_aw, abs_sum_op);
+            
+            // 输出row_sum_aw
+            // printf("after allreduce row_sum_aw[0] = %f row_sum_aw[1] = %f\n", static_cast<float>(row_sum_aw(0)), static_cast<float>(row_sum_aw(1)));
 
             #pragma unroll
             for (int mi = 0; mi < size<0>(row_sum_aw); mi++) {
                 aws(mi, page_index) += row_sum_aw(mi);
+                // printf("add aws[%d][%d] += %f\n", mi, page_index, static_cast<float>(row_sum_aw(mi))); // 现在所有奇数页也能运行到这里，但是全为nan
             }
-        }
-        // 输出row_sum_aw
-        for (int mi = 0; mi < size<0>(row_sum_aw); mi++) {
-            printf("row_sum_aw[%d] = %f\n", mi, static_cast<float>(row_sum_aw(mi)));
+
+            // printf("row_sum_aw[0] = %f, row_sum_aw[1] = %f\n", static_cast<float>(row_sum_aw(0)), static_cast<float>(row_sum_aw(1)));
+
         }
         clear(row_sum_aw);
     };

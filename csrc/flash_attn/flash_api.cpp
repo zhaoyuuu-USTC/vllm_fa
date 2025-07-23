@@ -723,7 +723,7 @@ mha_varlen_fwd(at::Tensor &q,  // total_q x num_heads x head_size, total_q := \s
     // H/t Daniel Haziza
     const int seqlenq_ngroups_swapped = max_seqlen_q == 1 && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size_og % 8 == 0 && !alibi_slopes_.has_value();
 
-    printf("In flash_api.cpp, seqlenq_ngroups_swapped = %d\n", seqlenq_ngroups_swapped);
+    // printf("In flash_api.cpp, seqlenq_ngroups_swapped = %d\n", seqlenq_ngroups_swapped);
     const int ngroups = num_heads / num_heads_k;
     if (seqlenq_ngroups_swapped) {
         q = q.reshape({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2).reshape({batch_size * ngroups, num_heads_k, head_size_og});
@@ -1272,7 +1272,7 @@ mha_fwd_kvcache_aws(at::Tensor &q,                 // batch_size x seqlen_q x nu
     const int num_heads_og = num_heads;
     const int head_size_og = sizes[3];
 
-    std::cout << "head_size_og: " << head_size_og << std::endl;
+    // std::cout << "head_size_og: " << head_size_og << std::endl;
 
 
     const int max_num_blocks_per_seq = !paged_KV ? 0 : block_table.size(1);   // 每个序列的最大块数
@@ -1311,7 +1311,7 @@ mha_fwd_kvcache_aws(at::Tensor &q,                 // batch_size x seqlen_q x nu
         max_num_blocks_per_seq_rounded = 512;
     }
     // 之后加上 判断split的逻辑
-    printf("max_num_blocks_per_seq_rounded: %d\n", max_num_blocks_per_seq_rounded);
+    // printf("max_num_blocks_per_seq_rounded: %d\n", max_num_blocks_per_seq_rounded);
     at::Tensor block_aws = torch::empty({batch_size, num_heads, seqlen_q, max_num_blocks_per_seq_rounded}, opts).transpose(1, 2);
     
 
@@ -1510,14 +1510,14 @@ mha_fwd_kvcache_aws(at::Tensor &q,                 // batch_size x seqlen_q x nu
     }
     
     // 输出 block_aws 和 block_aws_accum，便于调试
-    std::cout << "Test Block_AWS: " <<std::endl;
+    // std::cout << "Test Block_AWS: " <<std::endl;
     // std::cout << "num_splits: " << params.num_splits << std::endl;
     // std::cout << "Block_AwsAccum_Size: " << block_aws_accum.sizes() << std::endl;  // 
     // std::cout << "block_aws: " << block_aws[0] << std::endl;
 
     // std::cout << "block_aws_accum[0][0]: " << block_aws_accum[0][0] << std::endl;
     // std::cout << "block_aws_accum[0][1]: " << block_aws_accum[1][0] << std::endl;
-    std::cout << "block_aws.shape: " << block_aws.sizes() << std::endl;
+    // std::cout << "block_aws.shape: " << block_aws.sizes() << std::endl;
     
     // std::cout << "block_aws: " << block_aws << std::endl;
 
@@ -1535,7 +1535,7 @@ mha_fwd_kvcache_aws(at::Tensor &q,                 // batch_size x seqlen_q x nu
         block_aws = block_aws.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, max_num_blocks_per_seq_rounded});   // 3, 1, 8, 32
     }
 
-    printf("Here!");
+    // printf("Here!");
 
     return {out, block_aws};
 }

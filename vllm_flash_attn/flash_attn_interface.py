@@ -67,7 +67,7 @@ def _flash_attn_forward(
         return_softmax,
         None,
     )
-    print("flash_attn_forward")
+    # print("flash_attn_forward")
     return out, q, k, v, out_padded, softmax_lse, S_dmask, rng_state
 
 
@@ -113,7 +113,7 @@ def _flash_attn_varlen_forward(
         return_softmax,
         None,
     )
-    print("flash_attn_varlen_func.forward")
+    # print("flash_attn_varlen_func.forward")
     # if out.isnan().any() or softmax_lse.isnan().any():
     #     breakpoint()
     return out, q, k, v, out_padded, softmax_lse, S_dmask, rng_state
@@ -246,7 +246,7 @@ class FlashAttnQKVPackedFunc(torch.autograd.Function):
         *,
         out=None,
     ):
-        print("flash_attn_qkvpacked_func.forward")
+        # print("flash_attn_qkvpacked_func.forward")
         if softmax_scale is None:
             softmax_scale = qkv.shape[-1] ** (-0.5)
         out, q, k, v, out_padded, softmax_lse, S_dmask, rng_state = _flash_attn_forward(
@@ -318,7 +318,7 @@ class FlashAttnVarlenQKVPackedFunc(torch.autograd.Function):
         *,
         out=None,
     ):
-        print("flash_attn_varlen_qkvpacked_func.forward")
+        # print("flash_attn_varlen_qkvpacked_func.forward")
         if softmax_scale is None:
             softmax_scale = qkv.shape[-1] ** (-0.5)
         out, q, k, v, out_padded, softmax_lse, S_dmask, rng_state = _flash_attn_varlen_forward(
@@ -398,7 +398,7 @@ class FlashAttnKVPackedFunc(torch.autograd.Function):
         return_softmax,
         out=None,
     ):
-        print("flash_attn_kvpacked_func.forward")
+        # print("flash_attn_kvpacked_func.forward")
         if softmax_scale is None:
             softmax_scale = q.shape[-1] ** (-0.5)
         out, q, k, v, out_padded, softmax_lse, S_dmask, rng_state = _flash_attn_forward(
@@ -474,7 +474,7 @@ class FlashAttnVarlenKVPackedFunc(torch.autograd.Function):
         return_softmax,
         out=None,
     ):  
-        print("flash_attn_varlen_kvpacked_func.forward")
+        # print("flash_attn_varlen_kvpacked_func.forward")
         if softmax_scale is None:
             softmax_scale = q.shape[-1] ** (-0.5)
         out, q, k, v, out_padded, softmax_lse, S_dmask, rng_state = _flash_attn_varlen_forward(
@@ -636,7 +636,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         block_table,
         out=None,
     ):
-        print("flash_attn_varlen_func.forward")
+        # print("flash_attn_varlen_func.forward")
         if softmax_scale is None:
             softmax_scale = q.shape[-1] ** (-0.5)
         out, q, k, v, out_padded, softmax_lse, S_dmask, rng_state = _flash_attn_varlen_forward(
@@ -751,7 +751,7 @@ def flash_attn_qkvpacked_func(
             The output of softmax (possibly with different scaling). It also encodes the dropout
             pattern (negative means that location was dropped, nonnegative means it was kept).
     """
-    print("flash_attn_qkvpacked_func")
+    # print("flash_attn_qkvpacked_func")
     return FlashAttnQKVPackedFunc.apply(
         qkv,
         dropout_p,
@@ -831,7 +831,7 @@ def flash_attn_kvpacked_func(
             The output of softmax (possibly with different scaling). It also encodes the dropout
             pattern (negative means that location was dropped, nonnegative means it was kept).
     """
-    print("flash_attn_kvpacked_func")
+    # print("flash_attn_kvpacked_func")
     return FlashAttnKVPackedFunc.apply(
         q,
         kv,
@@ -910,7 +910,7 @@ def flash_attn_func(
             The output of softmax (possibly with different scaling). It also encodes the dropout
             pattern (negative means that location was dropped, nonnegative means it was kept).
     """
-    print("flash_attn_func")
+    # print("flash_attn_func")
     return FlashAttnFunc.apply(
         q,
         k,
@@ -979,7 +979,7 @@ def flash_attn_varlen_qkvpacked_func(
             The output of softmax (possibly with different scaling). It also encodes the dropout
             pattern (negative means that location was dropped, nonnegative means it was kept).
     """
-    print("flash_attn_varlen_qkvpacked_func")
+    # print("flash_attn_varlen_qkvpacked_func")
     return FlashAttnVarlenQKVPackedFunc.apply(
         qkv,
         cu_seqlens,
@@ -1071,7 +1071,7 @@ def flash_attn_varlen_kvpacked_func(
             The output of softmax (possibly with different scaling). It also encodes the dropout
             pattern (negative means that location was dropped, nonnegative means it was kept).
     """
-    print("flash_attn_varlen_kvpacked_func")
+    # print("flash_attn_varlen_kvpacked_func")
     return FlashAttnVarlenKVPackedFunc.apply(
         q,
         kv,
@@ -1166,7 +1166,7 @@ def flash_attn_varlen_func(
             The output of softmax (possibly with different scaling). It also encodes the dropout
             pattern (negative means that location was dropped, nonnegative means it was kept).
     """
-    print("flash_attn_varlen_func")
+    # print("flash_attn_varlen_func")
     return FlashAttnVarlenFunc.apply(
         q,
         k,
@@ -1298,7 +1298,7 @@ def flash_attn_with_kvcache(
     """
     assert k_cache.stride(-1) == 1, "k_cache must have contiguous last dimension"
     assert v_cache.stride(-1) == 1, "v_cache must have contiguous last dimension"
-    print("flash_attn_with_kvcache_ From flash_attn_interface.py")
+    # print("flash_attn_with_kvcache_ From flash_attn_interface.py")
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     if softmax_scale is None:
         softmax_scale = q.shape[-1] ** (-0.5)
@@ -1331,7 +1331,7 @@ def flash_attn_with_kvcache(
         num_splits,
     )
     # 强制输出params，无论return_softmax_lse是否为True
-    print(f"params: {params}")
+    # print(f"params: {params}")
     # print(f"out: {out.shape}, softmax_lse: {softmax_lse.shape}")
     return (out, softmax_lse) if return_softmax_lse else out
 
@@ -1361,7 +1361,7 @@ def flash_attn_with_kvcache_aws(
 
     assert k_cache.stride(-1) == 1, "k_cache must have contiguous last dimension"
     assert v_cache.stride(-1) == 1, "v_cache must have contiguous last dimension"
-    print("flash_attn_with_kvcache_aws")
+    # print("flash_attn_with_kvcache_aws")
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     if softmax_scale is None:
         softmax_scale = q.shape[-1] ** (-0.5)

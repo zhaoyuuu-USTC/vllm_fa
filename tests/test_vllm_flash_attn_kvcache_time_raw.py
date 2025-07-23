@@ -26,8 +26,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 NUM_HEADS = [(32, 2)]
 HEAD_SIZES = [96]
 BLOCK_SIZES = [128]
-KV_LENS = [[234, 1200, 1465, 688, 3200, 3300, 2940, 85, 290]]
-# KV_LENS = [[234, 1200, 1465, 688]]
+# KV_LENS = [[1500, 1300, 765], [234, 1200, 1465, 688]]
+KV_LENS = [[2048]]
 DTYPES = [torch.float16]
 # one value large enough to test overflow in index calculation.
 # one value small enough to test the schema op check
@@ -138,69 +138,20 @@ def test_flash_attn_with_paged_kv(
     block_tables_copy = torch.empty((num_seqs, max_num_blocks_per_seq), dtype=torch.int32, device=block_tables.device)
 
     block_tables_copy[:, :max_num_blocks_per_seq] = block_tables
+    
+    t_2 = time.perf_counter()
+    for i in range(1):
+        result_raw = torch.ops.vllm.flash_attn_with_kvcache(
+            decode_query=query.unsqueeze(1),
+            key_cache=key_cache,
+            value_cache=value_cache,
+            softmax_scale=scale,
+            causal=True,
+            block_table=block_tables,
+            cache_seqlens=kv_lens_tensor,
+            softcap=soft_cap if soft_cap is not None else 0,
+        )
+    t_1 = time.perf_counter()
+    print(f"time_flash_attn_with_kvcache_raw: {(t_1 - t_2)}")
 
-    # t0 = time.perf_counter()
 
-    result = torch.ops.vllm.flash_attn_with_kvcache_aws(
-        decode_query=query.unsqueeze(1),
-        key_cache=key_cache,
-        value_cache=value_cache,
-        softmax_scale=scale,
-        causal=True,
-        block_table=block_tables,
-        cache_seqlens=kv_lens_tensor,
-        softcap=soft_cap if soft_cap is not None else 0,
-    )
-
-    # print(f"result.shape: {result.shape}")
-    # block_aws = result.squeeze(1)
-
-    block_aws_list = result
-    # print(f"block_aws.shape: {block_aws.shape}")   （）
-    # t1 = time.perf_counter()
-    # t_with_kvcache = t1 - t0
-    # print(f"time_flash_attn_with_kvcache: {t_with_kvcache}")
-
-    if num_blocks <= 2048:
-        test_utils = ["test_faketensor", "test_schema"]
-    else:
-        test_utils = ["test_faketensor"]
-
-    ref_output, attn_list = ref_paged_attn(
-        query=query,
-        key_cache=key_cache,
-        value_cache=value_cache,
-        query_lens=[1] * num_seqs,
-        kv_lens=kv_lens,
-        block_tables=block_tables_copy,
-        scale=scale,
-        soft_cap=soft_cap,
-    )
-    for i in range(len(attn_list)):
-        # print(f"attn[{i}].shape: {attn[i].shape}")   # (32, 1, 1500) (32, 1, 1300)
-        attn = attn_list[i].abs().squeeze(1).mean(dim=0) # (32, 1500) (32, 1300)
-
-        block_aws = block_aws_list[i].abs().squeeze(0).mean(dim=0) 
-        # print(f"attn.shape: {attn.shape}")            # len
-        # print(f"block_aws.shape: {block_aws.shape}")  # (32)
- 
-        total_kv_len = attn.shape[0]
-        # print(f"total_kv_len: {total_kv_len}")
-        num_blocks = (total_kv_len + block_size - 1) // block_size
-        pad_len = 32 * block_size - total_kv_len
-        if pad_len > 0:
-            attn_padded = torch.cat([attn, attn.new_zeros(pad_len)], dim=0)
-        else:
-            attn_padded = attn
-        attn_blocks = attn_padded.view(32, block_size)
-
-        attn_blocks_sum_mean = attn_blocks.abs().mean(dim=1)
-
-        # 分别对 attn_blocks_sum_mean 和 block_aws_sum_mean 进行归一化
-        attn_blocks_sum_mean_norm = (attn_blocks_sum_mean - attn_blocks_sum_mean.min()) / (attn_blocks_sum_mean.max() - attn_blocks_sum_mean.min() + 1e-8)
-        block_aws_sum_mean_norm = (block_aws - block_aws.min()) / (block_aws.max() - block_aws.min() + 1e-8)
-
-        # print(f"attn_blocks_sum_mean_norm: {attn_blocks_sum_mean_norm}")
-        # print(f"block_aws_sum_mean_norm: {block_aws_sum_mean_norm}")
-
-        print(f"attn_blocks_sum_mean_norm - block_aws_sum_mean_norm: {attn_blocks_sum_mean_norm - block_aws_sum_mean_norm}")

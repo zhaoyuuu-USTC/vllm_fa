@@ -47,12 +47,15 @@ struct AttentionSumPLB_V1 {
     using TensorAws = decltype(make_tensor<float>(Shape<Int<KMRows>, Int<MaxPages>>{}));
     
     TensorAws aws;
-    TensorT row_sum_aw;
 
-    __forceinline__ __device__ AttentionSumPLB_V1() {};
+    __forceinline__ __device__ AttentionSumPLB_V1() {
+        clear(aws);  // 初始化aws张量为0
+    };
     // 这里从后往前遍历的块
     template<typename Tensor0>
     __forceinline__ __device__ void update_sum_aw(Tensor0 &acc_s, int n_block, int page_block_size, int kBlockN){
+        TensorT row_sum_aw;
+        clear(row_sum_aw);  // 每次调用时清零
 
         Tensor scores = make_tensor(acc_s.data(), flash::convert_layout_acc_rowcol(acc_s.layout()));
         static_assert(decltype(size<0>(scores))::value == KMRows);
@@ -62,16 +65,24 @@ struct AttentionSumPLB_V1 {
 
         AbsSumOp<float> abs_sum_op;
         
-        flash::template thread_aws_reduce_PLB_(scores, row_sum_aw, abs_sum_op);
+        // flash::template thread_aws_reduce_PLB_(scores, row_sum_aw, abs_sum_op);
         
+        // flash::template quad_aws_allreduce_PLB_(row_sum_aw, row_sum_aw, abs_sum_op);
+        #pragma unroll
+        for (int mi = 0; mi < size<0>(scores); mi++) {
+            #pragma unroll
+            for (int ni = 0; ni < size<1>(scores); ni++) {
+                row_sum_aw(mi) = abs_sum_op(row_sum_aw(mi), scores(mi, ni));
+            }
+        }
+        
+        // 进行线程间归约
         flash::template quad_aws_allreduce_PLB_(row_sum_aw, row_sum_aw, abs_sum_op);
         
         #pragma unroll
         for (int mi = 0; mi < size<0>(row_sum_aw); mi++) {
             aws(mi, page_idx) += row_sum_aw(mi);
         }
-
-        clear(row_sum_aw);
     };
 
     template<bool Split=false>

@@ -10,6 +10,7 @@
 #include "utils.h"
 
 #include <cstdio>
+#include <fstream>
 
 namespace flash {
 
@@ -47,13 +48,15 @@ struct AttentionSumPLB_V2 {
     using TensorAws = decltype(make_tensor<float>(Shape<Int<KMRows>, Int<MaxPages>>{}));
     
     TensorAws aws;
-    TensorT row_sum_aw;
 
-    __forceinline__ __device__ AttentionSumPLB_V2() {};
+    __forceinline__ __device__ AttentionSumPLB_V2() {
+        clear(aws);  // 初始化aws张量为0
+    };
     // 这里从后往前遍历的块
     template<typename Tensor0>
     __forceinline__ __device__ void update_sum_aw(Tensor0 &acc_s, int n_block, int page_block_size, int kBlockN){
-
+        TensorT row_sum_aw;  // 使用与aws相同的数据类型
+        
         Tensor scores = make_tensor(acc_s.data(), flash::convert_layout_acc_rowcol(acc_s.layout()));
         static_assert(decltype(size<0>(scores))::value == KMRows);
         // printf("ASPLB_V2  KMRows: %d, scores.shape: %d x %d\n", KMRows, int(size<0>(scores)), int(size<1>(scores))); 2 x 64
@@ -67,7 +70,7 @@ struct AttentionSumPLB_V2 {
 
         #pragma unroll
         for (int i = 0; i < page_nums; i++) {
-            clear(row_sum_aw);
+            clear(row_sum_aw);  // 确保每次循环开始时清零
 
             int page_index = start_page_index + i;
             // printf("page_index: %d\n", page_index);
@@ -82,28 +85,14 @@ struct AttentionSumPLB_V2 {
                 #pragma unroll
                 for (int ni = start_index; ni < end_index; ni++) {
                     row_sum_aw(mi) = abs_sum_op(row_sum_aw(mi), scores(mi, ni));
-                    // printf
-
                 }
-                // printf("start_index: %d, end_index: %d, row_sum_aw[%d] = %f\n", start_index, end_index, mi, static_cast<float>(row_sum_aw(mi)));
             }
-            
-            printf("row_sum_aw[0] = %f, row_sum_aw[1] = %f\n", static_cast<float>(row_sum_aw(0)), static_cast<float>(row_sum_aw(1)));
             flash::template quad_aws_allreduce_PLB_v2_(row_sum_aw, row_sum_aw, abs_sum_op);
-            
-            // 输出row_sum_aw
-            // printf("after allreduce row_sum_aw[0] = %f row_sum_aw[1] = %f\n", static_cast<float>(row_sum_aw(0)), static_cast<float>(row_sum_aw(1)));
-
             #pragma unroll
             for (int mi = 0; mi < size<0>(row_sum_aw); mi++) {
                 aws(mi, page_index) += row_sum_aw(mi);
-                // printf("add aws[%d][%d] += %f\n", mi, page_index, static_cast<float>(row_sum_aw(mi))); // 现在所有奇数页也能运行到这里，但是全为nan
             }
-
-            // printf("row_sum_aw[0] = %f, row_sum_aw[1] = %f\n", static_cast<float>(row_sum_aw(0)), static_cast<float>(row_sum_aw(1)));
-
         }
-        clear(row_sum_aw);
     };
 
     template<bool Split=false>

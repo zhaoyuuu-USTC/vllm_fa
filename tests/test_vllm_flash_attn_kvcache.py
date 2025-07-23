@@ -22,9 +22,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 # # one value small enough to test the schema op check
 # NUM_BLOCKS = [32768, 2048]
 
-NUM_HEADS = [(8, 2)]
-HEAD_SIZES = [64]
-BLOCK_SIZES = [128]
+# NUM_HEADS = [(32, 2), (16, 2), (8, 2), (32, 4), (16, 4), (8, 4)]
+NUM_HEADS = [(32, 2)]
+HEAD_SIZES = [96]
+BLOCK_SIZES = [64]
+# KV_LENS = [[1500, 1300, 765], [234, 1200, 1465, 688]]
+KV_LENS = [[234, 1200, 1465, 688]]
 DTYPES = [torch.float16]
 # one value large enough to test overflow in index calculation.
 # one value small enough to test the schema op check
@@ -47,6 +50,7 @@ def ref_paged_attn(
     _, block_size, num_kv_heads, head_size = key_cache.shape
 
     outputs: List[torch.Tensor] = []
+    attn_raws: List[torch.Tensor] = []
     start_idx = 0
     for i in range(num_seqs):
         query_len = query_lens[i]
@@ -77,17 +81,19 @@ def ref_paged_attn(
         if soft_cap is not None:
             attn = soft_cap * torch.tanh(attn / soft_cap)
         attn.masked_fill_(mask, float("-inf"))
+        attn_raw = attn.clone()
+        attn_raws.append(attn_raw)
+        # print(f"attn_raw.shape: {attn_raw.shape}")
         attn = torch.softmax(attn, dim=-1).to(v.dtype)
         out = torch.einsum("hqk,khd->qhd", attn, v)
 
         outputs.append(out)
         start_idx += query_len
-
-    return torch.cat(outputs, dim=0)
+    return torch.cat(outputs, dim=0), attn_raws
 
 # 两组，第一组三个序列，KV长度分别为1328, 18, 463，第二组四个序列，KV长度分别为1, 54, 293, 70
 # @pytest.mark.parametrize("kv_lens", [[1328, 18, 463], [1, 54, 293, 70]])
-@pytest.mark.parametrize("kv_lens", [[3200]])
+@pytest.mark.parametrize("kv_lens", KV_LENS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
 @pytest.mark.parametrize("block_size", BLOCK_SIZES)
@@ -124,12 +130,17 @@ def test_flash_attn_with_paged_kv(
     kv_lens_tensor = torch.tensor(kv_lens, dtype=torch.int32)
 
     max_num_blocks_per_seq = (max_kv_len + block_size - 1) // block_size
+
     block_tables = torch.randint(0,
                                  num_blocks,
                                  (num_seqs, max_num_blocks_per_seq),
                                  dtype=torch.int32)
-    # print(f"block_tables: {block_tables}")
+    block_tables_copy = torch.empty((num_seqs, max_num_blocks_per_seq), dtype=torch.int32, device=block_tables.device)
+
+    block_tables_copy[:, :max_num_blocks_per_seq] = block_tables
+
     # t0 = time.perf_counter()
+
     result = torch.ops.vllm.flash_attn_with_kvcache_aws(
         decode_query=query.unsqueeze(1),
         key_cache=key_cache,
@@ -140,8 +151,12 @@ def test_flash_attn_with_paged_kv(
         cache_seqlens=kv_lens_tensor,
         softcap=soft_cap if soft_cap is not None else 0,
     )
-    block_aws = result.squeeze(1)
-    # print(f"block_aws: {block_aws}")
+
+    # print(f"result.shape: {result.shape}")
+    # block_aws = result.squeeze(1)
+
+    block_aws_list = result
+    # print(f"block_aws.shape: {block_aws.shape}")   （）
     # t1 = time.perf_counter()
     # t_with_kvcache = t1 - t0
     # print(f"time_flash_attn_with_kvcache: {t_with_kvcache}")
@@ -151,48 +166,41 @@ def test_flash_attn_with_paged_kv(
     else:
         test_utils = ["test_faketensor"]
 
-    # torch.library.opcheck(torch.ops.vllm.flash_attn_with_kvcache_aws,
-    #                       args=tuple(),
-    #                       kwargs=dict(
-    #                           decode_query=query.unsqueeze(1),
-    #                           key_cache=key_cache,
-    #                           value_cache=value_cache,
-    #                           softmax_scale=scale,
-    #                           causal=True,
-    #                           block_table=block_tables,
-    #                           cache_seqlens=kv_lens_tensor,
-    #                           softcap=soft_cap if soft_cap is not None else 0,
-    #                       ),
-    #                       test_utils=test_utils)
-    # t1 = time.perf_counter()
-    ref_output = ref_paged_attn(
+    ref_output, attn_list = ref_paged_attn(
         query=query,
         key_cache=key_cache,
         value_cache=value_cache,
         query_lens=[1] * num_seqs,
         kv_lens=kv_lens,
-        block_tables=block_tables,
+        block_tables=block_tables_copy,
         scale=scale,
         soft_cap=soft_cap,
     )
-    # t2 = time.perf_counter()
-    # t_ref = t2 - t1
-    # print(f"time_ref: {t_ref}")
-    # print(f"time_ref / time_flash_attn_with_kvcache: {t_ref / t_with_kvcache}")
-    # torch.testing.assert_close(output, ref_output, atol=2e-2, rtol=1e-2), \
-    #     f"{torch.max(torch.abs(output - ref_output))}"
-    # print(f"block_aws: {block_aws.shape}")
-    # print(f"block_aws[0]: {block_aws[0]}")
-    # print(f"block_aws[1]: {block_aws[1]}")
-    # print(f"block_aws[2]: {block_aws[2]}")
-    
-    # print(f"ref_output: {ref_output.shape}")
-    # print(f"block_aws: {block_aws.shape}")
-    # # for i in range(block_aws.shape[0]):
-    # #     print(torch.sum(torch.abs(block_aws[i] - ref_output[i])))
-    # # 将 block_aws 的中间维度（即第1维，num_heads=8）相加，得到形状为 [3, 32]
-    # print("block_aws:", block_aws)
-    # block_aws_sum = block_aws.sum(dim=1)
-    # print("block_aws_sum.shape:", block_aws_sum.shape)
-    # print("block_aws_sum:", block_aws_sum[0])
-    # print("block_aws_sum:", block_aws_sum)
+    for i in range(len(attn_list)):
+        # print(f"attn[{i}].shape: {attn[i].shape}")   # (32, 1, 1500) (32, 1, 1300)
+        attn = attn_list[i].abs().squeeze(1).mean(dim=0) # (32, 1500) (32, 1300)
+
+        block_aws = block_aws_list[i].abs().squeeze(0).mean(dim=0) 
+        # print(f"attn.shape: {attn.shape}")            # len
+        # print(f"block_aws.shape: {block_aws.shape}")  # (32)
+ 
+        total_kv_len = attn.shape[0]
+        print(f"total_kv_len: {total_kv_len}")
+        num_blocks = (total_kv_len + block_size - 1) // block_size
+        pad_len = 32 * block_size - total_kv_len
+        if pad_len > 0:
+            attn_padded = torch.cat([attn, attn.new_zeros(pad_len)], dim=0)
+        else:
+            attn_padded = attn
+        attn_blocks = attn_padded.view(32, block_size)
+
+        attn_blocks_sum_mean = attn_blocks.abs().mean(dim=1)
+
+        # 分别对 attn_blocks_sum_mean 和 block_aws_sum_mean 进行归一化
+        attn_blocks_sum_mean_norm = (attn_blocks_sum_mean - attn_blocks_sum_mean.min()) / (attn_blocks_sum_mean.max() - attn_blocks_sum_mean.min() + 1e-8)
+        block_aws_sum_mean_norm = (block_aws - block_aws.min()) / (block_aws.max() - block_aws.min() + 1e-8)
+
+        # print(f"attn_blocks_sum_mean_norm: {attn_blocks_sum_mean_norm}")
+        # print(f"block_aws_sum_mean_norm: {block_aws_sum_mean_norm}")
+
+        print(f"attn_blocks_sum_mean_norm - block_aws_sum_mean_norm: {attn_blocks_sum_mean_norm - block_aws_sum_mean_norm}")

@@ -1272,6 +1272,9 @@ mha_fwd_kvcache_aws(at::Tensor &q,                 // batch_size x seqlen_q x nu
     const int num_heads_og = num_heads;
     const int head_size_og = sizes[3];
 
+    std::cout << "head_size_og: " << head_size_og << std::endl;
+
+
     const int max_num_blocks_per_seq = !paged_KV ? 0 : block_table.size(1);   // 每个序列的最大块数
     const int num_blocks = !paged_KV ? 0 : kcache.size(0);                    // 总的内存块数
     const int page_block_size = !paged_KV ? 1 : kcache.size(1);               // 页块大小
@@ -1308,6 +1311,7 @@ mha_fwd_kvcache_aws(at::Tensor &q,                 // batch_size x seqlen_q x nu
         max_num_blocks_per_seq_rounded = 512;
     }
     // 之后加上 判断split的逻辑
+    printf("max_num_blocks_per_seq_rounded: %d\n", max_num_blocks_per_seq_rounded);
     at::Tensor block_aws = torch::empty({batch_size, num_heads, seqlen_q, max_num_blocks_per_seq_rounded}, opts).transpose(1, 2);
     
 
@@ -1513,10 +1517,9 @@ mha_fwd_kvcache_aws(at::Tensor &q,                 // batch_size x seqlen_q x nu
 
     // std::cout << "block_aws_accum[0][0]: " << block_aws_accum[0][0] << std::endl;
     // std::cout << "block_aws_accum[0][1]: " << block_aws_accum[1][0] << std::endl;
-
     std::cout << "block_aws.shape: " << block_aws.sizes() << std::endl;
-
-    std::cout << "block_aws: " << block_aws << std::endl;
+    
+    // std::cout << "block_aws: " << block_aws << std::endl;
 
     // std::cout << "params.num_splits: " << params.num_splits << std::endl;  14
     // std::cout << "params.seqlen_q: " << params.seqlen_q << std::endl;   4 
@@ -1524,24 +1527,15 @@ mha_fwd_kvcache_aws(at::Tensor &q,                 // batch_size x seqlen_q x nu
     // std::cout << "params.b: " << params.b << std::endl;   1 
     // std::cout << "params.h: " << params.h << std::endl;   2
 
-
+    // std::cout << "seqlenq_ngroups_swapped: " << seqlenq_ngroups_swapped << std::endl;
     if (seqlenq_ngroups_swapped) {
         out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
+        
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
         block_aws = block_aws.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, max_num_blocks_per_seq_rounded});   // 3, 1, 8, 32
-        block_aws_accum = block_aws_accum.transpose(2, 3).reshape({params.num_splits, batch_size, 1, num_heads_k * seqlen_q, max_num_blocks_per_seq_rounded});   // 2, 3, 1, 8, 32
     }
-    // std::cout << "block_aws_accum.shape: " << block_aws_accum.sizes() << std::endl;
 
-
-    // std::cout << "block_aws_accum.sum(-2).shape: " << block_aws_accum_sum.sizes() << std::endl;
-    // std::cout << "block_aws_accum_sum.sizes(): " << block_aws_accum_sum.sizes() << std::endl;
-    // std::cout << "block_aws_accum[0]: " << block_aws_accum[0] << std::endl;
-    // std::cout << "block_aws_accum[1]: " << block_aws_accum[1] << std::endl;
-    // std::cout << "block_aws_accum[2]: " << block_aws_accum[2] << std::endl;
-    // std::cout << "block_aws_accum[3]: " << block_aws_accum[3] << std::endl;
-    // std::cout << "block_aws_accum[4]: " << block_aws_accum[4] << std::endl;
-
+    printf("Here!");
 
     return {out, block_aws};
 }

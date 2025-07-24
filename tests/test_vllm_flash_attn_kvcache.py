@@ -195,12 +195,13 @@ def test_flash_attn_with_paged_kv(
         attn_blocks = attn_padded.view(32, block_size)
 
         attn_blocks_sum_mean = attn_blocks.abs().mean(dim=1)
-
+        # print(f"attn_blocks_sum_mean: {attn_blocks_sum_mean}")
+        # print(f"block_aws: {block_aws}")
         # 分别对 attn_blocks_sum_mean 和 block_aws_sum_mean 进行归一化
         attn_blocks_sum_mean_norm = (attn_blocks_sum_mean - attn_blocks_sum_mean.min()) / (attn_blocks_sum_mean.max() - attn_blocks_sum_mean.min() + 1e-8)
         block_aws_sum_mean_norm = (block_aws - block_aws.min()) / (block_aws.max() - block_aws.min() + 1e-8)
 
-        # print(f"attn_blocks_sum_mean_norm: {attn_blocks_sum_mean_norm}")
-        # print(f"block_aws_sum_mean_norm: {block_aws_sum_mean_norm}")
+        print(f"attn_blocks_sum_mean_norm: {attn_blocks_sum_mean_norm}")
+        print(f"block_aws_sum_mean_norm: {block_aws_sum_mean_norm}")
 
-        print(f"attn_blocks_sum_mean_norm - block_aws_sum_mean_norm: {attn_blocks_sum_mean_norm - block_aws_sum_mean_norm}")
+        print(f"ref_paged_attn - flash_attn_aws: {attn_blocks_sum_mean_norm - block_aws_sum_mean_norm}")

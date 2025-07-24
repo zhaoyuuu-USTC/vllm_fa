@@ -118,10 +118,10 @@ def flash_attn_with_kvcache_aws(
         softcap=softcap,
         return_softmax_lse=return_softmax_lse,
     )
-    # 如果 return_softmax_lse=True，result 是 (out, softmax_lse)，但自定义操作符只能返回单个tensor
-    # 所以我们只返回 attention output
-    # print(f"result: {result.shape}")
-    return result
+    # 直接返回 result，不做任何判断
+    # 注意：result 是 (out, block_aws) 元组，但自定义操作符只能返回单个tensor
+    # 这会导致类型转换错误，需要在调用处处理
+    return result[1]
 
 @flash_attn_with_kvcache.register_fake  # type: ignore
 def _(
@@ -156,3 +156,53 @@ def _(
     block_aws_shape = output.shape[:-1] + (32,)
     block_aws = torch.empty(block_aws_shape, dtype=output.dtype, device=output.device)
     return  block_aws
+
+
+
+@torch.library.custom_op("vllm::flash_attn_with_kvcache_aws_output", mutates_args=[])
+def flash_attn_with_kvcache_aws_output(
+        decode_query: torch.Tensor,
+        key_cache: torch.Tensor,
+        value_cache: torch.Tensor,
+        cache_seqlens: Optional[torch.Tensor] = None,
+        block_table: Optional[torch.Tensor] = None,
+        softmax_scale: Optional[float] = None,
+        causal: bool = False,
+        alibi_slopes: Optional[torch.Tensor] = None,
+        softcap: float = 0.0,
+        return_softmax_lse: bool = False,
+) -> torch.Tensor:
+    result = _flash_attn_with_kvcache_aws(
+        decode_query,
+        key_cache,
+        value_cache,
+        cache_seqlens=cache_seqlens,
+        block_table=block_table,
+        softmax_scale=softmax_scale,
+        causal=causal,
+        alibi_slopes=alibi_slopes,
+        softcap=softcap,
+        return_softmax_lse=return_softmax_lse,
+    )
+    # 直接返回 result，不做任何判断
+    # 注意：result 是 (out, block_aws) 元组，但自定义操作符只能返回单个tensor
+    # 这会导致类型转换错误，需要在调用处处理
+    return result[0]
+
+@flash_attn_with_kvcache_aws_output.register_fake  # type: ignore
+def _(
+        decode_query: torch.Tensor,
+        key_cache: torch.Tensor,
+        value_cache: torch.Tensor,
+        cache_seqlens: Optional[torch.Tensor] = None,
+        block_table: Optional[torch.Tensor] = None,
+        softmax_scale: Optional[float] = None,
+        causal: bool = False,
+        alibi_slopes: Optional[torch.Tensor] = None,
+        softcap: float = 0.0,
+        return_softmax_lse: bool = False,
+) -> torch.Tensor:
+    # 创建与decode_query相同dtype的output
+    output = torch.empty_like(decode_query)
+
+    return output

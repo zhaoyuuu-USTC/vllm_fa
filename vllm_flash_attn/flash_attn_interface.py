@@ -1399,4 +1399,4 @@ def flash_attn_with_kvcache_aws(
     # print(f"block_aws: {block_aws.shape}")
     # print(f"block_aws: {block_aws}")
     # print(f"out: {out.shape}")
-    return block_aws
+    return (out, block_aws)

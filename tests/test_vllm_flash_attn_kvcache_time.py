@@ -167,7 +167,8 @@ def test_flash_attn_with_paged_kv(
             softcap=soft_cap if soft_cap is not None else 0,
         )
     t1 = time.perf_counter()
-
+    print("\n")
+    print(f"time_flash_attn_with_kvcache_aws: {(t1 - t0)}")
     block_aws_list = result
 
     if num_blocks <= 2048:
@@ -212,7 +213,7 @@ def test_flash_attn_with_paged_kv(
         attn_blocks_sum_mean_norm = (attn_blocks_sum_mean - attn_blocks_sum_mean.min()) / (attn_blocks_sum_mean.max() - attn_blocks_sum_mean.min() + 1e-8)
         block_aws_sum_mean_norm = (block_aws - block_aws.min()) / (block_aws.max() - block_aws.min() + 1e-8)
 
-        # print(f"attn_blocks_sum_mean_norm: {attn_blocks_sum_mean_norm}")
-        # print(f"block_aws_sum_mean_norm: {block_aws_sum_mean_norm}")
+        print(f"attn_blocks_sum_mean_norm: {attn_blocks_sum_mean_norm}")
+        print(f"block_aws_sum_mean_norm: {block_aws_sum_mean_norm}")
 
         print(f"attn_blocks_sum_mean_norm - block_aws_sum_mean_norm: {attn_blocks_sum_mean_norm - block_aws_sum_mean_norm}")

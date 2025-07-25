@@ -216,16 +216,6 @@
  
  
  
- 
- 
- 
- 
- 
- 
- 
- 
- 
- 
  // Is_V_in_regs is an option to reduce smem usage, but will increase register pressue.
  // No_double_buffer is another option to reduce smem usage, but will slow things down.
  template<int kHeadDim_, int kBlockM_, int kBlockN_, int kNWarps_,

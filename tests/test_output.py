@@ -81,15 +81,15 @@ def ref_paged_attn(
         if soft_cap is not None:
             attn = soft_cap * torch.tanh(attn / soft_cap)
         attn.masked_fill_(mask, float("-inf"))
-        attn_raw = attn.clone()
-        attn_raws.append(attn_raw)
+        # attn_raw = attn.clone()
+        # attn_raws.append(attn_raw)
         # print(f"attn_raw.shape: {attn_raw.shape}")
         attn = torch.softmax(attn, dim=-1).to(v.dtype)
         out = torch.einsum("hqk,khd->qhd", attn, v)
 
         outputs.append(out)
         start_idx += query_len
-    return torch.cat(outputs, dim=0), attn_raws
+    return torch.cat(outputs, dim=0)
 
 # 两组，第一组三个序列，KV长度分别为1328, 18, 463，第二组四个序列，KV长度分别为1, 54, 293, 70
 # @pytest.mark.parametrize("kv_lens", [[1328, 18, 463], [1, 54, 293, 70]])
@@ -166,7 +166,7 @@ def test_flash_attn_with_paged_kv(
     else:
         test_utils = ["test_faketensor"]
 
-    ref_output, attn_list = ref_paged_attn(
+    ref_output = ref_paged_attn(
         query=query,
         key_cache=key_cache,
         value_cache=value_cache,
@@ -177,3 +177,6 @@ def test_flash_attn_with_paged_kv(
         soft_cap=soft_cap,
     )
     ref_output = ref_output.unsqueeze(0)
+
+    # print(f"result: {result}")
+    print(f"ref_output: {ref_output}")

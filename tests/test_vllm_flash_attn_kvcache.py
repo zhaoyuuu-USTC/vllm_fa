@@ -152,11 +152,12 @@ def test_flash_attn_with_paged_kv(
         softcap=soft_cap if soft_cap is not None else 0,
     )
 
-    # print(f"result.shape: {result.shape}")
+    print(f"result.shape: {result.shape}")
     # block_aws = result.squeeze(1)
 
     block_aws_list = result
-    # print(f"block_aws.shape: {block_aws.shape}")   （）
+
+    print(f"block_aws_list.shape: {block_aws_list.shape}")  
     # t1 = time.perf_counter()
     # t_with_kvcache = t1 - t0
     # print(f"time_flash_attn_with_kvcache: {t_with_kvcache}")

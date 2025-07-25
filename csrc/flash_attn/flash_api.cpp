@@ -1515,7 +1515,7 @@ mha_fwd_kvcache_aws(at::Tensor &q,                 // batch_size x seqlen_q x nu
     // std::cout << "Block_AwsAccum_Size: " << block_aws_accum.sizes() << std::endl;  // 
     // std::cout << "block_aws: " << block_aws[0] << std::endl;
 
-    // std::cout << "block_aws_accum[0][0]: " << block_aws_accum[0][0] << std::endl;
+    // std::cout << "block_aws_accum[0]: " << block_aws_accum[0] << std::endl;
     // std::cout << "block_aws_accum[0][1]: " << block_aws_accum[1][0] << std::endl;
     // std::cout << "block_aws.shape: " << block_aws.sizes() << std::endl;
     
@@ -1528,6 +1528,8 @@ mha_fwd_kvcache_aws(at::Tensor &q,                 // batch_size x seqlen_q x nu
     // std::cout << "params.h: " << params.h << std::endl;   2
 
     // std::cout << "seqlenq_ngroups_swapped: " << seqlenq_ngroups_swapped << std::endl;
+
+    std::cout << "outaccum: " << out_accum << std::endl;
     if (seqlenq_ngroups_swapped) {
         out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
         
